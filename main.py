@@ -16,8 +16,37 @@ from lib_color import Color, Markdown, RESET
 
 load_dotenv()
 
+VERSION = "V1.2"
 DEBUG = "--debug" in sys.argv
 CHATS_FILE = pathlib.Path.home() / ".deepseek_chats.json"
+CONFIG_FILE = pathlib.Path.home() / ".deepseek_config.json"
+
+
+# ---------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------
+
+def load_config() -> dict:
+    if CONFIG_FILE.exists():
+        try:
+            return json.loads(CONFIG_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {"autosend": ""}
+    return {"autosend": ""}
+
+
+def save_config(cfg: dict):
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+
+
+def get_autosend() -> str:
+    return load_config().get("autosend", "")
+
+
+def set_autosend(text: str):
+    cfg = load_config()
+    cfg["autosend"] = text
+    save_config(cfg)
 
 
 # ---------------------------------------------------------------------
@@ -57,76 +86,105 @@ def delete_chat(chat_id: str):
 
 
 # ---------------------------------------------------------------------
-# Custom color escapes (run before Markdown.render)
+# Custom color escapes
 # ---------------------------------------------------------------------
 #
-#   \0xRRGGBB{text}   foreground from hex
-#   \C:name{text}     foreground preset
-#   \B:name{text}     background preset
+#   \C:{preset}text      foreground preset  (no closing brace on text)
+#   \B:{preset}text      background preset
+#   \Cx{RRGGBB}text      foreground hex
+#   \Bx{RRGGBB}text      background hex
+#   \R                   explicit reset
 #
-# Implemented with a hand-written scanner so nothing can leak.
+# Each escape applies until the next escape OR the end of a line.
+# A reset (\R) is auto-appended at each newline during rendering.
+#
+# Presets (24-bit): black, red, green, yellow, blue, magenta, cyan, white, gray
+# Presets (ANSI):   ansi_black, ansi_red, ..., ansi_bright_white
 # ---------------------------------------------------------------------
 
 def _apply_custom(text: str) -> str:
+    # First, split on newlines so we can auto-append \R at each line end
+    lines = text.split("\n")
+    rendered_lines = [_apply_custom_line(line) + RESET for line in lines]
+    return "\n".join(rendered_lines)
+
+
+def _apply_custom_line(line: str) -> str:
     result = []
     i = 0
-    n = len(text)
+    n = len(line)
     while i < n:
-        if text[i] == "\\" and i + 1 < n:
-            # \0xRRGGBB{...}
-            if text.startswith("\\0x", i):
-                j = i + 3
-                hex_start = j
-                while j < n and j - hex_start < 6 and text[j] in "0123456789abcdefABCDEF":
-                    j += 1
-                if j - hex_start == 6 and j < n and text[j] == "{":
-                    k = text.find("}", j + 1)
-                    if k != -1:
-                        value = int(text[hex_start:j], 16)
-                        r = (value >> 16) & 0xFF
-                        g = (value >> 8) & 0xFF
-                        b = value & 0xFF
-                        body = text[j + 1:k]
-                        result.append(Color.Basic.fg(r, g, b) + body + RESET)
-                        i = k + 1
-                        continue
-            # \C:name{...}
-            if text.startswith("\\C:", i):
-                j = i + 3
-                name_start = j
-                while j < n and (text[j].isalnum() or text[j] == "_"):
-                    j += 1
-                if j > name_start and j < n and text[j] == "{":
-                    k = text.find("}", j + 1)
-                    if k != -1:
-                        name = text[name_start:j]
-                        body = text[j + 1:k]
-                        fn = getattr(Color.ColorPresets, name, None)
-                        result.append(fn(body) if fn else body)
-                        i = k + 1
-                        continue
-            # \B:name{...}
-            if text.startswith("\\B:", i):
-                j = i + 3
-                name_start = j
-                while j < n and (text[j].isalnum() or text[j] == "_"):
-                    j += 1
-                if j > name_start and j < n and text[j] == "{":
-                    k = text.find("}", j + 1)
-                    if k != -1:
-                        name = text[name_start:j]
-                        body = text[j + 1:k]
-                        fn = getattr(Color.ColorPresets, name, None)
-                        if fn:
-                            sentinel = "\x00"
-                            wrapped = fn(sentinel)
-                            prefix = wrapped.split(sentinel)[0].replace("[38;2;", "[48;2;").replace("[38;5;", "[48;5;")
-                            result.append(f"{prefix}{body}{RESET}")
-                        else:
-                            result.append(body)
-                        i = k + 1
-                        continue
-        result.append(text[i])
+        if line[i] == "\\" and i + 1 < n:
+            # \R -> reset
+            if line.startswith("\\R", i):
+                result.append(RESET)
+                i += 2
+                continue
+
+            # \Cx{RRGGBB}
+            if line.startswith("\\Cx{", i):
+                j = i + 4
+                k = line.find("}", j)
+                if k != -1 and k - j == 6 and all(
+                    c in "0123456789abcdefABCDEF" for c in line[j:k]
+                ):
+                    value = int(line[j:k], 16)
+                    r = (value >> 16) & 0xFF
+                    g = (value >> 8) & 0xFF
+                    b = value & 0xFF
+                    result.append(Color.Basic.fg(r, g, b))
+                    i = k + 1
+                    continue
+
+            # \Bx{RRGGBB}
+            if line.startswith("\\Bx{", i):
+                j = i + 4
+                k = line.find("}", j)
+                if k != -1 and k - j == 6 and all(
+                    c in "0123456789abcdefABCDEF" for c in line[j:k]
+                ):
+                    value = int(line[j:k], 16)
+                    r = (value >> 16) & 0xFF
+                    g = (value >> 8) & 0xFF
+                    b = value & 0xFF
+                    result.append(Color.Basic.bg(r, g, b))
+                    i = k + 1
+                    continue
+
+            # \C:{preset}
+            if line.startswith("\\C:{", i):
+                j = i + 4
+                k = line.find("}", j)
+                if k != -1:
+                    preset = line[j:k].lower()
+                    fn = getattr(Color.ColorPresets, preset, None)
+                    if fn:
+                        sentinel = "\x00"
+                        wrapped = fn(sentinel)
+                        if sentinel in wrapped:
+                            result.append(wrapped.split(sentinel)[0])
+                    i = k + 1
+                    continue
+
+            # \B:{preset}
+            if line.startswith("\\B:{", i):
+                j = i + 4
+                k = line.find("}", j)
+                if k != -1:
+                    preset = line[j:k].lower()
+                    fn = getattr(Color.ColorPresets, preset, None)
+                    if fn:
+                        sentinel = "\x00"
+                        wrapped = fn(sentinel)
+                        if sentinel in wrapped:
+                            prefix = wrapped.split(sentinel)[0]
+                            prefix = prefix.replace("[38;2;", "[48;2;")
+                            prefix = prefix.replace("[38;5;", "[48;5;")
+                            result.append(prefix)
+                    i = k + 1
+                    continue
+
+        result.append(line[i])
         i += 1
     return "".join(result)
 
@@ -316,11 +374,11 @@ def build_chat_session() -> PromptSession:
     def _(event):
         event.current_buffer.validate_and_handle()
 
-    @kb.add("s-enter")
+    @kb.add("escape", "enter")
     def _(event):
         event.current_buffer.insert_text("\n")
 
-    @kb.add("escape", "enter")
+    @kb.add("c-j")
     def _(event):
         event.current_buffer.insert_text("\n")
 
@@ -339,7 +397,16 @@ def build_menu_session() -> PromptSession:
     def _(event):
         event.current_buffer.validate_and_handle()
 
-    return PromptSession(key_bindings=kb, editing_mode=EditingMode.EMACS)
+    @kb.add("c-j")
+    def _(event):
+        event.current_buffer.insert_text("\n")
+
+    return PromptSession(
+        key_bindings=kb,
+        multiline=True,
+        prompt_continuation=lambda width, line_number, is_soft_wrap: "  | ",
+        editing_mode=EditingMode.EMACS,
+    )
 
 
 CHAT_SESSION: PromptSession | None = None
@@ -360,16 +427,16 @@ def get_menu_session() -> PromptSession:
     return MENU_SESSION
 
 
-def ask_multiline(label: str = "Prompt: ") -> str:
+async def ask_multiline(label: str = "Prompt: ") -> str:
     session = get_chat_session()
     while True:
-        text = session.prompt(label)
+        text = await session.prompt_async(label)
         if text.strip():
             return text
 
 
-def ask_menu(label: str = "Select: ") -> str:
-    return get_menu_session().prompt(label)
+async def ask_menu(label: str = "Select: ") -> str:
+    return await get_menu_session().prompt_async(label)
 
 
 # ---------------------------------------------------------------------
@@ -381,9 +448,17 @@ def show_menu(chats: dict) -> list[tuple[str, dict]]:
                    key=lambda kv: kv[1].get("last_used", ""),
                    reverse=True)
 
-    banner = f"{Color.Basic.fg(100, 200, 255)}{Color.Format.bold('◆  DeepSeek Terminal')}{RESET}"
+    title = (
+        f"{Color.Basic.fg(100, 200, 255)}"
+        f"{Color.Format.bold('◆  DeepSeek Client')}"
+        f"{RESET}"
+        f"  "
+        f"{Color.Basic.fg(200, 225, 100)}"
+        f"{Color.Format.bold(VERSION)}"
+        f"{RESET}"
+    )
     print()
-    print("  " + banner)
+    print("  " + title)
     print("  " + Color.Format.dim("─" * 46))
 
     if not items:
@@ -396,13 +471,33 @@ def show_menu(chats: dict) -> list[tuple[str, dict]]:
         for i, (cid, meta) in enumerate(items, 1):
             r, g, b = palette[(i - 1) % len(palette)]
             num = f"{Color.Basic.fg(r, g, b)}{Color.Format.bold(f'{i:>2}.')}{RESET}"
-            title = meta.get("title", "(untitled)")
+            chat_title = meta.get("title", "(untitled)")
             cid_short = f"{Color.Basic.fg(110, 110, 110)}[{cid[:8]}]{RESET}"
-            print(f"   {num}  {title}  {cid_short}")
+            print(f"   {num}  {chat_title}  {cid_short}")
 
     print()
-    new = f"{Color.Basic.fg(0, 220, 120)}{Color.Format.bold(' 0.')}{RESET}  {Color.Basic.fg(0, 220, 120)}New chat{RESET}"
+    new = (
+        f"{Color.Basic.fg(0, 220, 120)}{Color.Format.bold(' 0.')}{RESET}"
+        f"  {Color.Basic.fg(0, 220, 120)}New chat{RESET}"
+    )
     print(new)
+
+    # Autosend status
+    autosend = get_autosend()
+    if autosend:
+        preview = autosend.replace("\n", " ")
+        if len(preview) > 40:
+            preview = preview[:37] + "..."
+        status = (
+            Color.Format.dim(" a  autosend: ")
+            + Color.Basic.fg(200, 225, 100)
+            + preview
+            + RESET
+            + Color.Format.dim("   (e: edit, x: clear)")
+        )
+    else:
+        status = Color.Format.dim(" a  autosend: (none)   (e: edit)")
+    print(" " + status)
 
     hints = (
         Color.Format.dim(" r <n> ")
@@ -424,7 +519,7 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
         items = show_menu(chats)
 
         try:
-            raw = ask_menu()
+            raw = await ask_menu()
         except EOFError:
             print()
             raise SystemExit(0)
@@ -438,6 +533,28 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
         if low in ("q", "quit", "exit", "stop"):
             raise SystemExit(0)
 
+        if low in ("e", "a"):
+            try:
+                current = get_autosend()
+                print(Color.Format.dim("  Enter autosend message (Alt+Enter / Ctrl+J for newline). Empty = clear."))
+                new_text = (await ask_menu("Autosend: ")).strip()
+            except EOFError:
+                raise SystemExit(0)
+            except KeyboardInterrupt:
+                print()
+                continue
+            set_autosend(new_text)
+            if new_text:
+                print(Color.MessagePresets.Success("  Autosend set."))
+            else:
+                print(Color.MessagePresets.Success("  Autosend cleared."))
+            continue
+
+        if low == "x":
+            set_autosend("")
+            print(Color.MessagePresets.Success("  Autosend cleared."))
+            continue
+
         if low.startswith("r "):
             try:
                 idx = int(low.split()[1])
@@ -446,9 +563,9 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
                 print(Color.MessagePresets.Error("  Invalid number."))
                 continue
             try:
-                new_title = ask_menu(
+                new_title = (await ask_menu(
                     f"New title for '{meta.get('title', '(untitled)')}': "
-                ).strip()
+                )).strip()
             except EOFError:
                 raise SystemExit(0)
             except KeyboardInterrupt:
@@ -467,9 +584,9 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
                 print(Color.MessagePresets.Error("  Invalid number."))
                 continue
             try:
-                confirm = ask_menu(
+                confirm = (await ask_menu(
                     f"Delete '{meta.get('title', '(untitled)')}'? [y/N]: "
-                ).strip().lower()
+                )).strip().lower()
             except EOFError:
                 raise SystemExit(0)
             except KeyboardInterrupt:
@@ -506,13 +623,42 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
 
 async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
                     first_turn: bool):
-    print(Color.Format.dim("  Enter: submit  |  Shift+Enter / Alt+Enter: newline"))
+    print(Color.Format.dim("  Enter: submit  |  Alt+Enter / Ctrl+J: newline"))
     print(Color.Format.dim("  Ctrl+C: back to menu  |  Ctrl+D or 'stop': quit"))
+
+    # Autosend only on a brand new chat
+    if first_turn:
+        autosend = get_autosend()
+        if autosend:
+            print()
+            print(Color.Format.dim("  Autosending initial message..."))
+            try:
+                reply, response_id = await send_message(
+                    session, token, autosend, chat_id, parent_message_id
+                )
+                print()
+                print(render_markdown(reply))
+                print()
+                if response_id is not None:
+                    parent_message_id = response_id
+                update_chat(chat_id, parent_message_id=parent_message_id)
+
+                fetched = await fetch_chat_title(session, token, chat_id)
+                title = fetched or (autosend[:40] + ("..." if len(autosend) > 40 else ""))
+                update_chat(chat_id, title=title)
+                first_turn = False
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                print()
+                print(Color.MessagePresets.Warning("  (autosend interrupted)"))
+            except Exception as e:
+                print()
+                print(Color.MessagePresets.Error(f"  Autosend error: {e}"))
+
     print()
 
     while True:
         try:
-            prompt = await asyncio.to_thread(ask_multiline)
+            prompt = await ask_multiline()
         except EOFError:
             print()
             raise SystemExit(0)
@@ -594,9 +740,11 @@ if __name__ == "__main__":
             "- bullet two\n\n"
             "> a quote\n\n"
             "A [link](https://example.com).\n\n"
-            "Custom: \\0xFF5733{orange} and \\C:cyan{cyan} and \\B:yellow{bg}.\n\n"
-            "```python\nprint('hello')\n```\n\n"
-            "---\n"
+            "\\C:{cyan}cyan preset\n"
+            "\\C:{red}red preset \\C:{yellow}and nested yellow\n"
+            "\\Cx{FF5733}orange hex\n"
+            "\\B:{blue}blue background\n"
+            "\\Bx{330033}and a purple background\n"
         )
         print(render_markdown(sample))
         sys.exit(0)
