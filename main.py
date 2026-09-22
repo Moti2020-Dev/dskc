@@ -16,7 +16,7 @@ from lib_color import Color, Markdown, RESET
 
 load_dotenv()
 
-VERSION = "V1.2"
+DEFAULT_VERSION = "V1.2"
 DEBUG = "--debug" in sys.argv
 CHATS_FILE = pathlib.Path.home() / ".deepseek_chats.json"
 CONFIG_FILE = pathlib.Path.home() / ".deepseek_config.json"
@@ -31,8 +31,8 @@ def load_config() -> dict:
         try:
             return json.loads(CONFIG_FILE.read_text())
         except (json.JSONDecodeError, OSError):
-            return {"autosend": ""}
-    return {"autosend": ""}
+            return {"autosend": "", "version": DEFAULT_VERSION}
+    return {"autosend": "", "version": DEFAULT_VERSION}
 
 
 def save_config(cfg: dict):
@@ -46,6 +46,14 @@ def get_autosend() -> str:
 def set_autosend(text: str):
     cfg = load_config()
     cfg["autosend"] = text
+    save_config(cfg)
+
+def get_version() -> str:
+    return load_config().get("version", DEFAULT_VERSION)
+
+def set_version(text: str):
+    cfg = load_config()
+    cfg["version"] = text
     save_config(cfg)
 
 
@@ -382,6 +390,14 @@ def build_chat_session() -> PromptSession:
     def _(event):
         event.current_buffer.insert_text("\n")
 
+    @kb.add("c-o")
+    def _(event):
+        event.current_buffer.insert_text("\n")
+    
+    @kb.add("escape", "enter")
+    def _(event):
+        event.current_buffer.insert_text("\n")
+
     return PromptSession(
         key_bindings=kb,
         multiline=True,
@@ -454,7 +470,7 @@ def show_menu(chats: dict) -> list[tuple[str, dict]]:
         f"{RESET}"
         f"  "
         f"{Color.Basic.fg(200, 225, 100)}"
-        f"{Color.Format.bold(VERSION)}"
+        f"{Color.Format.bold(get_version())}"
         f"{RESET}"
     )
     print()
@@ -504,6 +520,8 @@ def show_menu(chats: dict) -> list[tuple[str, dict]]:
         + Color.Basic.fg(200, 180, 255) + "rename" + RESET
         + Color.Format.dim("   d <n> ")
         + Color.Basic.fg(255, 130, 130) + "delete" + RESET
+        + Color.Format.dim("   v ")
+        + Color.Basic.fg(200, 225, 100) + "version" + RESET
         + Color.Format.dim("   q ")
         + Color.Basic.fg(180, 180, 180) + "quit" + RESET
     )
@@ -553,6 +571,21 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
         if low == "x":
             set_autosend("")
             print(Color.MessagePresets.Success("  Autosend cleared."))
+            continue
+
+        if low == "v":
+            try:
+                current = get_version()
+                print(Color.Format.dim(f"  Current version: {current}"))
+                new_ver = (await ask_menu("New version (empty = keep): ")).strip()
+            except EOFError:
+                raise SystemExit(0)
+            except KeyboardInterrupt:
+                print()
+                continue
+            if new_ver:
+                set_version(new_ver)
+                print(Color.MessagePresets.Success(f"  Version set to {new_ver}."))
             continue
 
         if low.startswith("r "):
