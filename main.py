@@ -537,7 +537,7 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
         items = show_menu(chats)
 
         try:
-            raw = await ask_menu()
+            raw = await ask_menu("Select: ")
         except EOFError:
             print()
             raise SystemExit(0)
