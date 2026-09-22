@@ -4,6 +4,7 @@ import json
 import uuid
 import sys
 import base64
+import re
 import pathlib
 import datetime
 import aiohttp
@@ -16,10 +17,14 @@ from lib_color import Color, Markdown, RESET
 
 load_dotenv()
 
-DEFAULT_VERSION = "V1.2"
+VERSION = "V1.2"
 DEBUG = "--debug" in sys.argv
-CHATS_FILE = pathlib.Path.home() / ".deepseek_chats.json"
-CONFIG_FILE = pathlib.Path.home() / ".deepseek_config.json"
+
+_HERE = pathlib.Path(__file__).resolve().parent
+CHATS_FILE = _HERE / "deepseek_chats.json"
+CONFIG_FILE = _HERE / "deepseek_config.json"
+HISTORY_DIR = _HERE / "history"
+HISTORY_DIR.mkdir(exist_ok=True)
 
 
 # ---------------------------------------------------------------------
@@ -31,8 +36,8 @@ def load_config() -> dict:
         try:
             return json.loads(CONFIG_FILE.read_text())
         except (json.JSONDecodeError, OSError):
-            return {"autosend": "", "version": DEFAULT_VERSION}
-    return {"autosend": "", "version": DEFAULT_VERSION}
+            return {"autosend": "", "version": VERSION}
+    return {"autosend": "", "version": VERSION}
 
 
 def save_config(cfg: dict):
@@ -48,8 +53,10 @@ def set_autosend(text: str):
     cfg["autosend"] = text
     save_config(cfg)
 
+
 def get_version() -> str:
-    return load_config().get("version", DEFAULT_VERSION)
+    return load_config().get("version", VERSION)
+
 
 def set_version(text: str):
     cfg = load_config()
@@ -94,24 +101,71 @@ def delete_chat(chat_id: str):
 
 
 # ---------------------------------------------------------------------
+# Per-chat history (for export)
+# ---------------------------------------------------------------------
+
+def _history_path(chat_id: str) -> pathlib.Path:
+    return HISTORY_DIR / f"{chat_id}.json"
+
+
+def append_history(chat_id: str, role: str, content: str):
+    p = _history_path(chat_id)
+    if p.exists():
+        data = json.loads(p.read_text())
+    else:
+        data = {"chat_id": chat_id, "messages": []}
+    data["messages"].append({
+        "role": role,
+        "content": content,
+        "at": datetime.datetime.now().isoformat(),
+    })
+    p.write_text(json.dumps(data, indent=2))
+
+
+def export_chat_markdown(chat_id: str) -> pathlib.Path | None:
+    p = _history_path(chat_id)
+    if not p.exists():
+        return None
+    data = json.loads(p.read_text())
+    title = load_chats().get("chats", {}).get(chat_id, {}).get("title", chat_id)
+    out_path = _HERE / f"export_{chat_id[:8]}.md"
+
+    lines = [
+        f"# {title}",
+        "",
+        f"- Chat ID: `{chat_id}`",
+        f"- URL: https://chat.deepseek.com/a/chat/s/{chat_id}",
+        f"- Exported: {datetime.datetime.now().isoformat()}",
+        "",
+        "---",
+        "",
+    ]
+    for msg in data["messages"]:
+        role = "You" if msg["role"] == "user" else "DeepSeek"
+        lines.append(f"### {role}")
+        lines.append("")
+        lines.append(msg["content"])
+        lines.append("")
+
+    out_path.write_text("\n".join(lines))
+    return out_path
+
+
+# ---------------------------------------------------------------------
 # Custom color escapes
 # ---------------------------------------------------------------------
 #
-#   \C:{preset}text      foreground preset  (no closing brace on text)
+#   \C:{preset}text      foreground preset
 #   \B:{preset}text      background preset
 #   \Cx{RRGGBB}text      foreground hex
 #   \Bx{RRGGBB}text      background hex
 #   \R                   explicit reset
 #
-# Each escape applies until the next escape OR the end of a line.
-# A reset (\R) is auto-appended at each newline during rendering.
-#
-# Presets (24-bit): black, red, green, yellow, blue, magenta, cyan, white, gray
-# Presets (ANSI):   ansi_black, ansi_red, ..., ansi_bright_white
+# Each escape applies until the next escape or end of line.
+# A reset is auto-appended at each newline.
 # ---------------------------------------------------------------------
 
 def _apply_custom(text: str) -> str:
-    # First, split on newlines so we can auto-append \R at each line end
     lines = text.split("\n")
     rendered_lines = [_apply_custom_line(line) + RESET for line in lines]
     return "\n".join(rendered_lines)
@@ -123,13 +177,11 @@ def _apply_custom_line(line: str) -> str:
     n = len(line)
     while i < n:
         if line[i] == "\\" and i + 1 < n:
-            # \R -> reset
             if line.startswith("\\R", i):
                 result.append(RESET)
                 i += 2
                 continue
 
-            # \Cx{RRGGBB}
             if line.startswith("\\Cx{", i):
                 j = i + 4
                 k = line.find("}", j)
@@ -144,7 +196,6 @@ def _apply_custom_line(line: str) -> str:
                     i = k + 1
                     continue
 
-            # \Bx{RRGGBB}
             if line.startswith("\\Bx{", i):
                 j = i + 4
                 k = line.find("}", j)
@@ -159,7 +210,6 @@ def _apply_custom_line(line: str) -> str:
                     i = k + 1
                     continue
 
-            # \C:{preset}
             if line.startswith("\\C:{", i):
                 j = i + 4
                 k = line.find("}", j)
@@ -174,7 +224,6 @@ def _apply_custom_line(line: str) -> str:
                     i = k + 1
                     continue
 
-            # \B:{preset}
             if line.startswith("\\B:{", i):
                 j = i + 4
                 k = line.find("}", j)
@@ -199,6 +248,24 @@ def _apply_custom_line(line: str) -> str:
 
 def render_markdown(text: str) -> str:
     return Markdown.render(_apply_custom(text))
+
+
+# ---------------------------------------------------------------------
+# Title marker parser
+# ---------------------------------------------------------------------
+#
+# The model prepends \{Title}\ on its own line. We strip it and use
+# it as the chat title.
+# ---------------------------------------------------------------------
+
+_TITLE_RE = re.compile(r"^\\\{([^}]*)\}\\\s*\n?", re.MULTILINE)
+
+
+def extract_title(text: str) -> tuple[str | None, str]:
+    m = _TITLE_RE.match(text)
+    if m:
+        return m.group(1).strip(), text[m.end():]
+    return None, text
 
 
 # ---------------------------------------------------------------------
@@ -382,18 +449,10 @@ def build_chat_session() -> PromptSession:
     def _(event):
         event.current_buffer.validate_and_handle()
 
-    @kb.add("escape", "enter")
-    def _(event):
-        event.current_buffer.insert_text("\n")
-
-    @kb.add("c-j")
-    def _(event):
-        event.current_buffer.insert_text("\n")
-
     @kb.add("c-o")
     def _(event):
         event.current_buffer.insert_text("\n")
-    
+
     @kb.add("escape", "enter")
     def _(event):
         event.current_buffer.insert_text("\n")
@@ -413,7 +472,7 @@ def build_menu_session() -> PromptSession:
     def _(event):
         event.current_buffer.validate_and_handle()
 
-    @kb.add("c-j")
+    @kb.add("c-o")
     def _(event):
         event.current_buffer.insert_text("\n")
 
@@ -498,7 +557,6 @@ def show_menu(chats: dict) -> list[tuple[str, dict]]:
     )
     print(new)
 
-    # Autosend status
     autosend = get_autosend()
     if autosend:
         preview = autosend.replace("\n", " ")
@@ -520,6 +578,8 @@ def show_menu(chats: dict) -> list[tuple[str, dict]]:
         + Color.Basic.fg(200, 180, 255) + "rename" + RESET
         + Color.Format.dim("   d <n> ")
         + Color.Basic.fg(255, 130, 130) + "delete" + RESET
+        + Color.Format.dim("   x <n> ")
+        + Color.Basic.fg(100, 200, 255) + "export" + RESET
         + Color.Format.dim("   v ")
         + Color.Basic.fg(200, 225, 100) + "version" + RESET
         + Color.Format.dim("   q ")
@@ -537,7 +597,7 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
         items = show_menu(chats)
 
         try:
-            raw = await ask_menu("Select: ")
+            raw = await ask_menu()
         except EOFError:
             print()
             raise SystemExit(0)
@@ -553,8 +613,7 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
 
         if low in ("e", "a"):
             try:
-                current = get_autosend()
-                print(Color.Format.dim("  Enter autosend message (Alt+Enter / Ctrl+J for newline). Empty = clear."))
+                print(Color.Format.dim("  Enter autosend message. Enter = submit, Ctrl+O = newline. Empty = clear."))
                 new_text = (await ask_menu("Autosend: ")).strip()
             except EOFError:
                 raise SystemExit(0)
@@ -630,6 +689,20 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
                 print(Color.MessagePresets.Success("  Deleted."))
             continue
 
+        if low.startswith("x "):
+            try:
+                idx = int(low.split()[1])
+                cid, meta = items[idx - 1]
+            except (ValueError, IndexError):
+                print(Color.MessagePresets.Error("  Invalid number."))
+                continue
+            path = export_chat_markdown(cid)
+            if path:
+                print(Color.MessagePresets.Success(f"  Exported to: {path}"))
+            else:
+                print(Color.MessagePresets.Warning("  No history to export for this chat."))
+            continue
+
         if raw == "0":
             chat_id = await create_chat_session(session, token)
             print(Color.MessagePresets.Success(f"  Created new chat: {chat_id}"))
@@ -654,9 +727,15 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
 # Chat loop
 # ---------------------------------------------------------------------
 
+def _hyperlink(url: str, label: str) -> str:
+    return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
+
+
 async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
                     first_turn: bool):
-    print(Color.Format.dim("  Enter: submit  |  Alt+Enter / Ctrl+J: newline"))
+    url = f"https://chat.deepseek.com/a/chat/s/{chat_id}"
+    print(Color.Format.dim("  Chat: ") + _hyperlink(url, url))
+    print(Color.Format.dim("  Enter: submit  |  Ctrl+O: newline"))
     print(Color.Format.dim("  Ctrl+C: back to menu  |  Ctrl+D or 'stop': quit"))
 
     # Autosend only on a brand new chat
@@ -669,9 +748,7 @@ async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
                 reply, response_id = await send_message(
                     session, token, autosend, chat_id, parent_message_id
                 )
-                print()
-                print(render_markdown(reply))
-                print()
+                print(Color.Format.dim("  Style acknowledged."))
                 if response_id is not None:
                     parent_message_id = response_id
                 update_chat(chat_id, parent_message_id=parent_message_id)
@@ -681,10 +758,8 @@ async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
                 update_chat(chat_id, title=title)
                 first_turn = False
             except (KeyboardInterrupt, asyncio.CancelledError):
-                print()
                 print(Color.MessagePresets.Warning("  (autosend interrupted)"))
             except Exception as e:
-                print()
                 print(Color.MessagePresets.Error(f"  Autosend error: {e}"))
 
     print()
@@ -706,6 +781,15 @@ async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
             raise SystemExit(0)
         if low in ("quit", "exit", "/quit", "/exit"):
             return
+        if low == ":export":
+            path = export_chat_markdown(chat_id)
+            if path:
+                print(Color.MessagePresets.Success(f"  Exported to: {path}"))
+            else:
+                print(Color.MessagePresets.Warning("  No history to export yet."))
+            continue
+
+        append_history(chat_id, "user", stripped)
 
         try:
             reply, response_id = await send_message(
@@ -719,6 +803,12 @@ async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
             print()
             print(Color.MessagePresets.Error(f"  Error: {e}"))
             continue
+
+        title_from_reply, reply = extract_title(reply)
+        if title_from_reply:
+            update_chat(chat_id, title=title_from_reply)
+
+        append_history(chat_id, "assistant", reply)
 
         print()
         print(render_markdown(reply))
