@@ -356,6 +356,10 @@ class Markdown:
         text = Markdown._wrap_pairs(text, "_", "_",
                                     lambda s: f"{ITALIC}{s}{UNITALIC}")
 
+        # 4.5 Strikethrough ~~...~~
+        text = Markdown._wrap_pairs(text, "~~", "~~",
+                            lambda s: f"{STRIKE}{s}{UNSTRIKE}")
+
         # 5. Links [label](url)
         text = Markdown._links(text)
         return text
