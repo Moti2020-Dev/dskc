@@ -17,12 +17,13 @@ from lib_color import Color, Markdown, RESET
 
 load_dotenv()
 
-VERSION = "V1.2"
+DEFAULT_VERSION = "V1.2"
 DEBUG = "--debug" in sys.argv
 
 _HERE = pathlib.Path(__file__).resolve().parent
-CHATS_FILE = _HERE / "deepseek_chats.json"
-CONFIG_FILE = _HERE / "deepseek_config.json"
+CHATS_FILE = _HERE / "chats.json"
+CONFIG_FILE = _HERE / "config.json"
+THEMES_FILE = _HERE / "themes.json"
 HISTORY_DIR = _HERE / "history"
 HISTORY_DIR.mkdir(exist_ok=True)
 
@@ -31,13 +32,31 @@ HISTORY_DIR.mkdir(exist_ok=True)
 # Config
 # ---------------------------------------------------------------------
 
+_BUILTIN_THEME = {
+    "banner": "100,200,255",
+    "version": "200,225,100",
+    "prompt": "100,200,255",
+    "continuation": "110,110,110",
+    "error": "255,80,80",
+    "warning": "255,200,0",
+    "success": "0,220,120",
+    "info": "0,170,170",
+    "dim": "120,120,120",
+    "chat_num": "255,215,0",
+    "chat_id": "110,110,110",
+    "menu_action": "200,180,255",
+    "menu_key": "180,180,180",
+    "link": "100,200,255",
+}
+
+
 def load_config() -> dict:
     if CONFIG_FILE.exists():
         try:
             return json.loads(CONFIG_FILE.read_text())
         except (json.JSONDecodeError, OSError):
-            return {"autosend": "", "version": VERSION}
-    return {"autosend": "", "version": VERSION}
+            pass
+    return {"autosend": "", "version": DEFAULT_VERSION, "theme": "default"}
 
 
 def save_config(cfg: dict):
@@ -55,7 +74,7 @@ def set_autosend(text: str):
 
 
 def get_version() -> str:
-    return load_config().get("version", VERSION)
+    return load_config().get("version", DEFAULT_VERSION)
 
 
 def set_version(text: str):
@@ -63,6 +82,99 @@ def set_version(text: str):
     cfg["version"] = text
     save_config(cfg)
 
+
+def get_theme_name() -> str:
+    return load_config().get("theme", "default")
+
+
+def set_theme_name(name: str):
+    cfg = load_config()
+    cfg["theme"] = name
+    save_config(cfg)
+
+
+def load_themes() -> dict:
+    if THEMES_FILE.exists():
+        try:
+            data = json.loads(THEMES_FILE.read_text())
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"default": dict(_BUILTIN_THEME)}
+
+
+def get_theme() -> dict:
+    themes = load_themes()
+    name = get_theme_name()
+    base = themes.get("default", _BUILTIN_THEME)
+    chosen = themes.get(name, base)
+    merged = dict(_BUILTIN_THEME)
+    merged.update(base)
+    merged.update(chosen)
+    return merged
+
+
+def tag(name: str, text: str) -> str:
+    """Apply a theme tag to text."""
+    theme = get_theme()
+    value = theme.get(name)
+    if not value:
+        return text
+    try:
+        r, g, b = (int(x.strip()) for x in value.split(","))
+    except (ValueError, AttributeError):
+        return text
+    return f"{Color.Basic.fg(r, g, b)}{text}{RESET}"
+
+
+_BANNER_GRADIENT = [
+    (0x1a, 0x1a, 0x6e),
+    (0x1a, 0x3a, 0x7e),
+    (0x1a, 0x5a, 0x8e),
+    (0x1a, 0x7a, 0x9e),
+    (0x1a, 0x9a, 0xae),
+    (0x1a, 0xba, 0xbe),
+    (0x1a, 0xda, 0xce),
+    (0x1a, 0xfa, 0xde),
+]
+
+
+def _gradient_text(text: str) -> str:
+    """Color each visible character along the banner gradient."""
+    stops = _BANNER_GRADIENT
+    n = len(stops)
+    visible = [i for i, ch in enumerate(text) if ch != " "]
+    if not visible:
+        return text
+    out = []
+    for i, ch in enumerate(text):
+        if ch == " ":
+            out.append(ch)
+            continue
+        # progress of this visible char among all visible chars
+        pos = visible.index(i)
+        t = pos / max(1, len(visible) - 1)
+        idx = int(round(t * (n - 1)))
+        r, g, b = stops[idx]
+        out.append(f"{Color.Basic.fg(r, g, b)}{ch}")
+    out.append(RESET)
+    return "".join(out)
+
+def show_banner():
+    border = tag("dim", "▌")
+    bar_top = tag("dim", "▛" + "▀" * 39)
+    bar_bot = tag("dim", "▙" + "▄" * 39)
+
+    line1 = _gradient_text("  ◆  D S K C  ·  D E E P S E E K  ")
+    line2 = _gradient_text("     a command-line client         ")
+
+    print()
+    print(" " + bar_top)
+    print(" " + border + line1 + tag("dim", "▐"))
+    print(" " + border + line2 + tag("dim", "▐"))
+    print(" " + bar_bot)
+    print()
 
 # ---------------------------------------------------------------------
 # Chat storage
@@ -111,7 +223,10 @@ def _history_path(chat_id: str) -> pathlib.Path:
 def append_history(chat_id: str, role: str, content: str):
     p = _history_path(chat_id)
     if p.exists():
-        data = json.loads(p.read_text())
+        try:
+            data = json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError):
+            data = {"chat_id": chat_id, "messages": []}
     else:
         data = {"chat_id": chat_id, "messages": []}
     data["messages"].append({
@@ -126,7 +241,11 @@ def export_chat_markdown(chat_id: str) -> pathlib.Path | None:
     p = _history_path(chat_id)
     if not p.exists():
         return None
-    data = json.loads(p.read_text())
+    try:
+        data = json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
     title = load_chats().get("chats", {}).get(chat_id, {}).get("title", chat_id)
     out_path = _HERE / f"export_{chat_id[:8]}.md"
 
@@ -140,11 +259,11 @@ def export_chat_markdown(chat_id: str) -> pathlib.Path | None:
         "---",
         "",
     ]
-    for msg in data["messages"]:
-        role = "You" if msg["role"] == "user" else "DeepSeek"
+    for msg in data.get("messages", []):
+        role = "You" if msg.get("role") == "user" else "DeepSeek"
         lines.append(f"### {role}")
         lines.append("")
-        lines.append(msg["content"])
+        lines.append(msg.get("content", ""))
         lines.append("")
 
     out_path.write_text("\n".join(lines))
@@ -155,13 +274,15 @@ def export_chat_markdown(chat_id: str) -> pathlib.Path | None:
 # Custom color escapes
 # ---------------------------------------------------------------------
 #
-#   \C:{preset}text      foreground preset
-#   \B:{preset}text      background preset
-#   \Cx{RRGGBB}text      foreground hex
-#   \Bx{RRGGBB}text      background hex
-#   \R                   explicit reset
+#   \C:{preset}text       foreground preset
+#   \B:{preset}text       background preset
+#   \Cx{RRGGBB}text       foreground hex
+#   \Bx{RRGGBB}text       background hex
+#   \U:on                 underline on
+#   \U:off                underline off
+#   \R                    explicit reset
 #
-# Each escape applies until the next escape or end of line.
+# Each color escape applies until the next escape or end of line.
 # A reset is auto-appended at each newline.
 # ---------------------------------------------------------------------
 
@@ -180,6 +301,16 @@ def _apply_custom_line(line: str) -> str:
             if line.startswith("\\R", i):
                 result.append(RESET)
                 i += 2
+                continue
+
+            if line.startswith("\\U:on", i):
+                result.append("\033[4m")
+                i += 5
+                continue
+
+            if line.startswith("\\U:off", i):
+                result.append("\033[24m")
+                i += 6
                 continue
 
             if line.startswith("\\Cx{", i):
@@ -251,11 +382,7 @@ def render_markdown(text: str) -> str:
 
 
 # ---------------------------------------------------------------------
-# Title marker parser
-# ---------------------------------------------------------------------
-#
-# The model prepends \{Title}\ on its own line. We strip it and use
-# it as the chat title.
+# Title marker
 # ---------------------------------------------------------------------
 
 _TITLE_RE = re.compile(r"^\\\{([^}]*)\}\\\s*\n?", re.MULTILINE)
@@ -439,8 +566,18 @@ async def send_message(session, token, prompt: str, chat_id: str,
 
 
 # ---------------------------------------------------------------------
-# Prompt sessions
+# Menu sentinels + key bindings
 # ---------------------------------------------------------------------
+
+S_QUIT     = "\x00QUIT"
+S_CANCEL   = "\x00CANCEL"
+S_RENAME   = "\x00RENAME"
+S_DELETE   = "\x00DELETE"
+S_EXPORT   = "\x00EXPORT"
+S_VERSION  = "\x00VERSION"
+S_THEME    = "\x00THEME"
+S_AUTOSEND = "\x00AUTOSEND"
+
 
 def build_chat_session() -> PromptSession:
     kb = KeyBindings()
@@ -457,10 +594,14 @@ def build_chat_session() -> PromptSession:
     def _(event):
         event.current_buffer.insert_text("\n")
 
+    @kb.add("escape", eager=True)
+    def _(event):
+        event.app.exit(result=S_CANCEL)
+
     return PromptSession(
         key_bindings=kb,
         multiline=True,
-        prompt_continuation=lambda width, line_number, is_soft_wrap: "  | ",
+        prompt_continuation=lambda width, line_number, is_soft_wrap: tag("continuation", "  | "),
         editing_mode=EditingMode.EMACS,
     )
 
@@ -476,10 +617,26 @@ def build_menu_session() -> PromptSession:
     def _(event):
         event.current_buffer.insert_text("\n")
 
+    @kb.add("escape", eager=True)
+    def _(event):
+        event.app.exit(result=S_CANCEL)
+
+    for key, sentinel in [
+        ("r", S_RENAME), ("d", S_DELETE), ("x", S_EXPORT),
+        ("v", S_VERSION), ("t", S_THEME),
+        ("e", S_AUTOSEND), ("a", S_AUTOSEND),
+        ("q", S_QUIT),
+    ]:
+        def make_handler(sent=sentinel):
+            def handler(event):
+                event.app.exit(result=sent)
+            return handler
+        kb.add(key)(make_handler())
+
     return PromptSession(
         key_bindings=kb,
         multiline=True,
-        prompt_continuation=lambda width, line_number, is_soft_wrap: "  | ",
+        prompt_continuation=lambda width, line_number, is_soft_wrap: tag("continuation", "  | "),
         editing_mode=EditingMode.EMACS,
     )
 
@@ -502,15 +659,21 @@ def get_menu_session() -> PromptSession:
     return MENU_SESSION
 
 
-async def ask_multiline(label: str = "Prompt: ") -> str:
+async def ask_multiline(label: str | None = None) -> str:
     session = get_chat_session()
+    if label is None:
+        label = tag("prompt", "Prompt: ")
     while True:
         text = await session.prompt_async(label)
+        if text == S_CANCEL:
+            raise KeyboardInterrupt
         if text.strip():
             return text
 
 
-async def ask_menu(label: str = "Select: ") -> str:
+async def ask_menu(label: str | None = None) -> str:
+    if label is None:
+        label = tag("prompt", "> ")
     return await get_menu_session().prompt_async(label)
 
 
@@ -523,38 +686,26 @@ def show_menu(chats: dict) -> list[tuple[str, dict]]:
                    key=lambda kv: kv[1].get("last_used", ""),
                    reverse=True)
 
-    title = (
-        f"{Color.Basic.fg(100, 200, 255)}"
-        f"{Color.Format.bold('◆  DeepSeek Client')}"
-        f"{RESET}"
-        f"  "
-        f"{Color.Basic.fg(200, 225, 100)}"
-        f"{Color.Format.bold(get_version())}"
-        f"{RESET}"
+    show_banner()
+    subtitle = (
+        tag("version", Color.Format.bold(get_version()))
+        + "  "
+        + tag("dim", f"[{get_theme_name()}]")
     )
-    print()
-    print("  " + title)
-    print("  " + Color.Format.dim("─" * 46))
+    print("  " + subtitle)
+    print("  " + tag("dim", "─" * 46))
 
     if not items:
-        print("  " + Color.Format.dim("(no chats yet)"))
+        print("  " + tag("dim", "(no chats yet)"))
     else:
-        palette = [
-            (255, 215, 0), (0, 220, 220), (170, 220, 255), (200, 180, 255),
-            (180, 255, 180), (255, 200, 150), (255, 170, 220), (200, 200, 200),
-        ]
         for i, (cid, meta) in enumerate(items, 1):
-            r, g, b = palette[(i - 1) % len(palette)]
-            num = f"{Color.Basic.fg(r, g, b)}{Color.Format.bold(f'{i:>2}.')}{RESET}"
+            num = tag("chat_num", Color.Format.bold(f"{i:>2}."))
             chat_title = meta.get("title", "(untitled)")
-            cid_short = f"{Color.Basic.fg(110, 110, 110)}[{cid[:8]}]{RESET}"
+            cid_short = tag("chat_id", f"[{cid[:8]}]")
             print(f"   {num}  {chat_title}  {cid_short}")
 
     print()
-    new = (
-        f"{Color.Basic.fg(0, 220, 120)}{Color.Format.bold(' 0.')}{RESET}"
-        f"  {Color.Basic.fg(0, 220, 120)}New chat{RESET}"
-    )
+    new = tag("success", Color.Format.bold(" 0.")) + "  " + tag("success", "New chat")
     print(new)
 
     autosend = get_autosend()
@@ -563,31 +714,40 @@ def show_menu(chats: dict) -> list[tuple[str, dict]]:
         if len(preview) > 40:
             preview = preview[:37] + "..."
         status = (
-            Color.Format.dim(" a  autosend: ")
-            + Color.Basic.fg(200, 225, 100)
-            + preview
-            + RESET
-            + Color.Format.dim("   (e: edit, x: clear)")
+            tag("dim", " a  autosend: ")
+            + tag("version", preview)
+            + tag("dim", "   (e: edit, x: clear)")
         )
     else:
-        status = Color.Format.dim(" a  autosend: (none)   (e: edit)")
+        status = tag("dim", " a  autosend: (none)   (e: edit)")
     print(" " + status)
 
     hints = (
-        Color.Format.dim(" r <n> ")
-        + Color.Basic.fg(200, 180, 255) + "rename" + RESET
-        + Color.Format.dim("   d <n> ")
-        + Color.Basic.fg(255, 130, 130) + "delete" + RESET
-        + Color.Format.dim("   x <n> ")
-        + Color.Basic.fg(100, 200, 255) + "export" + RESET
-        + Color.Format.dim("   v ")
-        + Color.Basic.fg(200, 225, 100) + "version" + RESET
-        + Color.Format.dim("   q ")
-        + Color.Basic.fg(180, 180, 180) + "quit" + RESET
+        tag("dim", " r ")
+        + tag("menu_action", "rename")
+        + tag("dim", "   d ")
+        + tag("menu_action", "delete")
+        + tag("dim", "   x ")
+        + tag("link", "export")
+        + tag("dim", "   t ")
+        + tag("menu_action", "theme")
+        + tag("dim", "   v ")
+        + tag("version", "version")
+        + tag("dim", "   q ")
+        + tag("menu_key", "quit")
     )
     print(" " + hints)
     print()
     return items
+
+
+def _pick_chat(items, raw: str):
+    if not raw.isdigit():
+        return None
+    idx = int(raw)
+    if 1 <= idx <= len(items):
+        return items[idx - 1]
+    return None
 
 
 async def menu(session, token) -> tuple[str, int | None, bool]:
@@ -605,55 +765,30 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
             print()
             continue
 
-        raw = raw.strip()
-        low = raw.lower()
-
-        if low in ("q", "quit", "exit", "stop"):
+        if raw == S_QUIT:
             raise SystemExit(0)
+        if raw == S_CANCEL:
+            continue
 
-        if low in ("e", "a"):
+        # ---- Rename --------------------------------------------------
+        if raw == S_RENAME:
+            if not items:
+                print(Color.MessagePresets.Warning("  Create a chat to rename it."))
+                continue
             try:
-                print(Color.Format.dim("  Enter autosend message. Enter = submit, Ctrl+O = newline. Empty = clear."))
-                new_text = (await ask_menu("Autosend: ")).strip()
+                idx_raw = (await ask_menu("Which chat do you want to rename? ")).strip()
             except EOFError:
                 raise SystemExit(0)
             except KeyboardInterrupt:
                 print()
                 continue
-            set_autosend(new_text)
-            if new_text:
-                print(Color.MessagePresets.Success("  Autosend set."))
-            else:
-                print(Color.MessagePresets.Success("  Autosend cleared."))
-            continue
-
-        if low == "x":
-            set_autosend("")
-            print(Color.MessagePresets.Success("  Autosend cleared."))
-            continue
-
-        if low == "v":
-            try:
-                current = get_version()
-                print(Color.Format.dim(f"  Current version: {current}"))
-                new_ver = (await ask_menu("New version (empty = keep): ")).strip()
-            except EOFError:
-                raise SystemExit(0)
-            except KeyboardInterrupt:
-                print()
+            if idx_raw == S_CANCEL or not idx_raw:
                 continue
-            if new_ver:
-                set_version(new_ver)
-                print(Color.MessagePresets.Success(f"  Version set to {new_ver}."))
-            continue
-
-        if low.startswith("r "):
-            try:
-                idx = int(low.split()[1])
-                cid, meta = items[idx - 1]
-            except (ValueError, IndexError):
+            picked = _pick_chat(items, idx_raw)
+            if not picked:
                 print(Color.MessagePresets.Error("  Invalid number."))
                 continue
+            cid, meta = picked
             try:
                 new_title = (await ask_menu(
                     f"New title for '{meta.get('title', '(untitled)')}': "
@@ -663,18 +798,30 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
             except KeyboardInterrupt:
                 print()
                 continue
-            if new_title:
+            if new_title and new_title != S_CANCEL:
                 update_chat(cid, title=new_title)
                 print(Color.MessagePresets.Success("  Renamed."))
             continue
 
-        if low.startswith("d "):
+        # ---- Delete --------------------------------------------------
+        if raw == S_DELETE:
+            if not items:
+                print(Color.MessagePresets.Warning("  Create a chat to delete it."))
+                continue
             try:
-                idx = int(low.split()[1])
-                cid, meta = items[idx - 1]
-            except (ValueError, IndexError):
+                idx_raw = (await ask_menu("Which chat do you want to delete? ")).strip()
+            except EOFError:
+                raise SystemExit(0)
+            except KeyboardInterrupt:
+                print()
+                continue
+            if idx_raw == S_CANCEL or not idx_raw:
+                continue
+            picked = _pick_chat(items, idx_raw)
+            if not picked:
                 print(Color.MessagePresets.Error("  Invalid number."))
                 continue
+            cid, meta = picked
             try:
                 confirm = (await ask_menu(
                     f"Delete '{meta.get('title', '(untitled)')}'? [y/N]: "
@@ -689,13 +836,25 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
                 print(Color.MessagePresets.Success("  Deleted."))
             continue
 
-        if low.startswith("x "):
+        # ---- Export --------------------------------------------------
+        if raw == S_EXPORT:
+            if not items:
+                print(Color.MessagePresets.Warning("  Create a chat to export it."))
+                continue
             try:
-                idx = int(low.split()[1])
-                cid, meta = items[idx - 1]
-            except (ValueError, IndexError):
+                idx_raw = (await ask_menu("Which chat do you want to export? ")).strip()
+            except EOFError:
+                raise SystemExit(0)
+            except KeyboardInterrupt:
+                print()
+                continue
+            if idx_raw == S_CANCEL or not idx_raw:
+                continue
+            picked = _pick_chat(items, idx_raw)
+            if not picked:
                 print(Color.MessagePresets.Error("  Invalid number."))
                 continue
+            cid, _ = picked
             path = export_chat_markdown(cid)
             if path:
                 print(Color.MessagePresets.Success(f"  Exported to: {path}"))
@@ -703,17 +862,81 @@ async def menu(session, token) -> tuple[str, int | None, bool]:
                 print(Color.MessagePresets.Warning("  No history to export for this chat."))
             continue
 
+        # ---- Version -------------------------------------------------
+        if raw == S_VERSION:
+            try:
+                current = get_version()
+                print(Color.Format.dim(f"  Current version: {current}"))
+                new_ver = (await ask_menu("New version (empty = keep): ")).strip()
+            except EOFError:
+                raise SystemExit(0)
+            except KeyboardInterrupt:
+                print()
+                continue
+            if new_ver and new_ver != S_CANCEL:
+                set_version(new_ver)
+                print(Color.MessagePresets.Success(f"  Version set to {new_ver}."))
+            continue
+
+        # ---- Theme ---------------------------------------------------
+        if raw == S_THEME:
+            themes = load_themes()
+            names = list(themes.keys())
+            print(tag("dim", "  Available themes:"))
+            for i, name in enumerate(names, 1):
+                marker = " *" if name == get_theme_name() else ""
+                print(f"    {i}. {name}{marker}")
+            try:
+                choice = (await ask_menu("Pick theme: ")).strip()
+            except EOFError:
+                raise SystemExit(0)
+            except KeyboardInterrupt:
+                print()
+                continue
+            if choice == S_CANCEL or not choice:
+                continue
+            if choice.isdigit() and 1 <= int(choice) <= len(names):
+                set_theme_name(names[int(choice) - 1])
+                print(Color.MessagePresets.Success(f"  Theme set to {names[int(choice) - 1]}."))
+            else:
+                print(Color.MessagePresets.Error("  Invalid choice."))
+            continue
+
+        # ---- Autosend ------------------------------------------------
+        if raw == S_AUTOSEND:
+            try:
+                print(Color.Format.dim(
+                    "  Enter autosend message. Enter = submit, Ctrl+O = newline. Empty = clear."
+                ))
+                new_text = (await ask_menu("Autosend: ")).strip()
+            except EOFError:
+                raise SystemExit(0)
+            except KeyboardInterrupt:
+                print()
+                continue
+            if new_text == S_CANCEL:
+                continue
+            set_autosend(new_text)
+            if new_text:
+                print(Color.MessagePresets.Success("  Autosend set."))
+            else:
+                print(Color.MessagePresets.Success("  Autosend cleared."))
+            continue
+
+        # ---- New chat (0) --------------------------------------------
         if raw == "0":
             chat_id = await create_chat_session(session, token)
             print(Color.MessagePresets.Success(f"  Created new chat: {chat_id}"))
             return chat_id, None, True
 
+        # ---- Resume by number ----------------------------------------
         if raw.isdigit() and 1 <= int(raw) <= len(items):
             cid, meta = items[int(raw) - 1]
             parent = meta.get("parent_message_id")
             print(Color.MessagePresets.Info(f"  Resuming: {cid}"))
             return cid, parent, False
 
+        # ---- Resume by UUID ------------------------------------------
         try:
             uuid.UUID(raw)
             parent = chats.get(raw, {}).get("parent_message_id")
@@ -734,21 +957,20 @@ def _hyperlink(url: str, label: str) -> str:
 async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
                     first_turn: bool):
     url = f"https://chat.deepseek.com/a/chat/s/{chat_id}"
-    print(Color.Format.dim("  Chat: ") + _hyperlink(url, url))
-    print(Color.Format.dim("  Enter: submit  |  Ctrl+O: newline"))
-    print(Color.Format.dim("  Ctrl+C: back to menu  |  Ctrl+D or 'stop': quit"))
+    print(tag("dim", "  Chat: ") + tag("link", _hyperlink(url, url)))
+    print(tag("dim", "  Enter: submit  |  Ctrl+O: newline"))
+    print(tag("dim", "  Ctrl+C: back to menu  |  Ctrl+D or 'stop': quit"))
 
-    # Autosend only on a brand new chat
     if first_turn:
         autosend = get_autosend()
         if autosend:
             print()
-            print(Color.Format.dim("  Autosending initial message..."))
+            print(tag("dim", "  Autosending initial message..."))
             try:
                 reply, response_id = await send_message(
                     session, token, autosend, chat_id, parent_message_id
                 )
-                print(Color.Format.dim("  Style acknowledged."))
+                print(tag("dim", "  Style acknowledged."))
                 if response_id is not None:
                     parent_message_id = response_id
                 update_chat(chat_id, parent_message_id=parent_message_id)
@@ -859,15 +1081,12 @@ if __name__ == "__main__":
             "# Heading 1\n"
             "## Heading 2\n\n"
             "Plain **bold** and *italic* and `code`.\n\n"
-            "- bullet one\n"
-            "- bullet two\n\n"
-            "> a quote\n\n"
-            "A [link](https://example.com).\n\n"
-            "\\C:{cyan}cyan preset\n"
-            "\\C:{red}red preset \\C:{yellow}and nested yellow\n"
+            "\\C:{cyan}cyan preset \U:onand underlined\U:off\n"
+            "\\C:{red}red preset \\C:{yellow}then yellow\n"
             "\\Cx{FF5733}orange hex\n"
             "\\B:{blue}blue background\n"
             "\\Bx{330033}and a purple background\n"
+            "~~strikethrough~~ and \\U:onunderlined text\U:off\n"
         )
         print(render_markdown(sample))
         sys.exit(0)

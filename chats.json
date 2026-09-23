@@ -1,0 +1,14 @@
+{
+  "chats": {
+    "f51ae83f-2590-467b-9315-b8bc1ace659d": {
+      "parent_message_id": 78,
+      "last_used": "2026-09-23T18:53:19.152788",
+      "title": "Chat 1"
+    },
+    "88bab68d-7f91-44b9-ba18-2721b6e612dc": {
+      "parent_message_id": 2,
+      "last_used": "2026-09-22T21:07:19.415531",
+      "title": "T Chat 1"
+    }
+  }
+}
