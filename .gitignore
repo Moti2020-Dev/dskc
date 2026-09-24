@@ -1,15 +1,69 @@
-# Virtual Env
-.venv
-
-# Python Cache
-__pycache__
-
-# Enviroment
+# --- Secrets ---
 .env
+.env.*
+!.env.example
 
-# JSON files from runtime.
-deepseek_chats.json
-deepseek_config.json
+# --- Local data (user-specific, do not commit) ---
+config.json
+chats.json
+history/
+export_*.md
+export_*.html
+themes.local.json
 
-# Chat history
-history/*
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Testing / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# --- Linting / type-checking caches ---
+.mypy_cache/
+.dmypy.json
+.ruff_cache/
+.pytype/
+
+# --- Editors / IDEs ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Compiled / build artifacts from C extensions ---
+*.o
+*.obj
+*.pyd
+*.dll
+*.dylib
