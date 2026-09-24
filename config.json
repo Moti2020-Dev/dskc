@@ -1,4 +1,0 @@
-{
-  "autosend": "Format replies with these codes. Braces go around the preset or hex ONLY, never the text. Newlines auto-reset, so no closing needed.\n\n\\C:{preset}text       foreground preset\n\\B:{preset}text       background preset\n\\Cx{RRGGBB}text       foreground hex\n\\Bx{RRGGBB}text       background hex\n\nPresets: black, red, green, yellow, blue, magenta, cyan, white, gray, plus ansi_* and ansi_bright_* variants.\nHex is case-insensitive. No nesting. No color codes inside code fences. Use tastefully.\n\nExample: \\C:{cyan}hello \\Cx{FF5733}orange \\B:{blue}blue background\n\nConfirm and wait for my next message.",
-  "version": "V1.5"
-}
