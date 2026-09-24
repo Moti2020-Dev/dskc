@@ -2,8 +2,7 @@ import base64
 import json
 import aiohttp
 from pow_solver import DeepSeekHash
-
-DEBUG = "--debug" in __import__("sys").argv
+from .debug import dbg
 
 
 def parse_sse_line(line: str):
@@ -24,6 +23,8 @@ def parse_sse_line(line: str):
 
 
 async def solve_pow(session, token, target_path="/api/v0/chat/completion"):
+    import time
+    t0 = time.monotonic()
     async with session.post(
         "https://chat.deepseek.com/api/v0/chat/create_pow_challenge",
         headers={"Authorization": f"Bearer {token}"},
@@ -31,6 +32,7 @@ async def solve_pow(session, token, target_path="/api/v0/chat/completion"):
     ) as resp:
         data = await resp.json()
         challenge = data["data"]["biz_data"]["challenge"]
+    dbg("pow challenge", challenge.get("difficulty"))
 
     solver = DeepSeekHash()
     answer = solver.calculate_hash(
@@ -41,6 +43,7 @@ async def solve_pow(session, token, target_path="/api/v0/chat/completion"):
     )
     if answer is None:
         raise RuntimeError("PoW not solved")
+    dbg("pow solved in", f"{(time.monotonic() - t0) * 1000:.1f} ms")
 
     result = {
         "algorithm": challenge["algorithm"],
@@ -60,8 +63,7 @@ async def create_chat_session(session, token) -> str:
         json={},
     ) as resp:
         data = await resp.json()
-        if DEBUG:
-            print(f"[DEBUG] create_chat_session raw: {json.dumps(data)[:500]}")
+        dbg("create_chat_session", json.dumps(data)[:300])
         try:
             return data["data"]["biz_data"]["chat_session"]["id"]
         except (KeyError, TypeError):
@@ -74,7 +76,7 @@ async def create_chat_session(session, token) -> str:
             raise ValueError(f"Could not find session ID. Response: {data}")
 
 
-async def fetch_chat_title(session, token, chat_id: str) -> str | None:
+async def fetch_chat_title(session, token, chat_id: str):
     try:
         async with session.get(
             "https://chat.deepseek.com/api/v0/chat_session/fetch_page",
@@ -82,11 +84,11 @@ async def fetch_chat_title(session, token, chat_id: str) -> str | None:
             params={"count": 50},
         ) as resp:
             data = await resp.json()
-    except Exception:
+    except Exception as e:
+        dbg("fetch_page failed", str(e))
         return None
 
-    if DEBUG:
-        print(f"[DEBUG] fetch_page raw: {json.dumps(data)[:500]}")
+    dbg("fetch_page", json.dumps(data)[:300])
 
     try:
         sessions = data.get("data", {}).get("biz_data", {}).get("sessions", [])
@@ -101,6 +103,8 @@ async def fetch_chat_title(session, token, chat_id: str) -> str | None:
 
 async def send_message(session, token, prompt: str, chat_id: str,
                        parent_message_id: int | None = None):
+    import time
+    t0 = time.monotonic()
     pow_response = await solve_pow(session, token)
 
     payload = {
@@ -111,9 +115,15 @@ async def send_message(session, token, prompt: str, chat_id: str,
         "thinking_enabled": False,
         "search_enabled": False,
     }
+    dbg("send_message payload", {
+        "chat": chat_id[:8],
+        "parent": parent_message_id,
+        "prompt_len": len(prompt),
+    })
 
     content_parts: list[str] = []
     metadata = {}
+    chunk_count = 0
 
     async with session.post(
         "https://chat.deepseek.com/api/v0/chat/completion",
@@ -131,10 +141,8 @@ async def send_message(session, token, prompt: str, chat_id: str,
                 continue
 
             kind, value = parsed
-            if DEBUG:
-                print(f"[DEBUG] {kind}: {json.dumps(value)[:200]}")
-
             if kind == "event":
+                dbg("sse event", value)
                 continue
 
             obj = value
@@ -145,15 +153,18 @@ async def send_message(session, token, prompt: str, chat_id: str,
                 chunk = obj.get("v", "")
                 if isinstance(chunk, str):
                     content_parts.append(chunk)
+                    chunk_count += 1
                 continue
 
             if set(obj.keys()) == {"v"}:
                 chunk = obj["v"]
                 if isinstance(chunk, str):
                     content_parts.append(chunk)
+                    chunk_count += 1
                 continue
 
             if obj.get("o") == "SET":
+                dbg("sse set", (obj.get("p"), obj.get("v")))
                 continue
 
             if "v" in obj and isinstance(obj["v"], dict):
@@ -168,5 +179,12 @@ async def send_message(session, token, prompt: str, chat_id: str,
                         "model_type", "updated_at"):
                 if key in obj:
                     metadata[key] = obj[key]
+
+    dbg("stream done", {
+        "chunks": chunk_count,
+        "chars": sum(len(c) for c in content_parts),
+        "elapsed_ms": f"{(time.monotonic() - t0) * 1000:.0f}",
+        "response_id": metadata.get("response_message_id"),
+    })
 
     return "".join(content_parts), metadata.get("response_message_id")

@@ -4,7 +4,6 @@ import sys
 from dskc import config
 from dskc.menu import run as run_menu
 
-global DEBUG
 
 async def main():
     token = config.get_token()
@@ -29,7 +28,6 @@ if __name__ == "__main__":
         )
         print(render_markdown(sample))
         sys.exit(0)
-    
 
     try:
         asyncio.run(main())

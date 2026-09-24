@@ -9,15 +9,27 @@ S_CANCEL   = "\x00CANCEL"
 S_RENAME   = "\x00RENAME"
 S_DELETE   = "\x00DELETE"
 S_EXPORT   = "\x00EXPORT"
-S_VERSION  = "\x00VERSION"
+S_SETTINGS = "\x00SETTINGS"
 S_THEME    = "\x00THEME"
+S_VERSION  = "\x00VERSION"
 S_AUTOSEND = "\x00AUTOSEND"
+S_BACK     = "\x00BACK"
 
-_ACTION_BINDINGS = [
-    ("r", S_RENAME), ("d", S_DELETE), ("x", S_EXPORT),
-    ("v", S_VERSION), ("t", S_THEME),
-    ("e", S_AUTOSEND), ("a", S_AUTOSEND),
+# Main menu single-key actions
+_MENU_ACTIONS = [
+    ("r", S_RENAME),
+    ("d", S_DELETE),
+    ("x", S_EXPORT),
+    ("s", S_SETTINGS),
     ("q", S_QUIT),
+]
+
+# Settings submenu single-key actions
+_SETTINGS_ACTIONS = [
+    ("a", S_AUTOSEND),
+    ("t", S_THEME),
+    ("v", S_VERSION),
+    ("b", S_BACK),
 ]
 
 
@@ -34,9 +46,7 @@ def _action_handler(sentinel, char):
     return handler
 
 
-def build_menu_session() -> PromptSession:
-    kb = KeyBindings()
-
+def _common_bindings(kb):
     @kb.add("enter")
     def _(event):
         event.current_buffer.validate_and_handle()
@@ -49,55 +59,13 @@ def build_menu_session() -> PromptSession:
     def _(event):
         event.app.exit(result=S_CANCEL)
 
-    for key, sentinel in _ACTION_BINDINGS:
-        kb.add(key)(_action_handler(sentinel, key))
 
-    return PromptSession(
-        key_bindings=kb,
-        multiline=True,
-        prompt_continuation=_continuation,
-        editing_mode=EditingMode.EMACS,
-    )
-
-
-def build_input_session() -> PromptSession:
+def build_session(actions=None) -> PromptSession:
     kb = KeyBindings()
-
-    @kb.add("enter")
-    def _(event):
-        event.current_buffer.validate_and_handle()
-
-    @kb.add("c-o")
-    def _(event):
-        event.current_buffer.insert_text("\n")
-
-    @kb.add("escape", eager=True)
-    def _(event):
-        event.app.exit(result=S_CANCEL)
-
-    return PromptSession(
-        key_bindings=kb,
-        multiline=True,
-        prompt_continuation=_continuation,
-        editing_mode=EditingMode.EMACS,
-    )
-
-
-def build_chat_session() -> PromptSession:
-    kb = KeyBindings()
-
-    @kb.add("enter")
-    def _(event):
-        event.current_buffer.validate_and_handle()
-
-    @kb.add("c-o")
-    def _(event):
-        event.current_buffer.insert_text("\n")
-
-    @kb.add("escape", eager=True)
-    def _(event):
-        event.app.exit(result=S_CANCEL)
-
+    _common_bindings(kb)
+    if actions:
+        for key, sentinel in actions:
+            kb.add(key)(_action_handler(sentinel, key))
     return PromptSession(
         key_bindings=kb,
         multiline=True,
@@ -109,21 +77,35 @@ def build_chat_session() -> PromptSession:
 _MENU_SESSION: PromptSession | None = None
 _INPUT_SESSION: PromptSession | None = None
 _CHAT_SESSION: PromptSession | None = None
+_SETTINGS_SESSION: PromptSession | None = None
 
 
-def _get(name, builder):
-    global _MENU_SESSION, _INPUT_SESSION, _CHAT_SESSION
-    if name == "menu":
-        if _MENU_SESSION is None:
-            _MENU_SESSION = builder()
-        return _MENU_SESSION
-    if name == "input":
-        if _INPUT_SESSION is None:
-            _INPUT_SESSION = builder()
-        return _INPUT_SESSION
+def _get_menu() -> PromptSession:
+    global _MENU_SESSION
+    if _MENU_SESSION is None:
+        _MENU_SESSION = build_session(_MENU_ACTIONS)
+    return _MENU_SESSION
+
+
+def _get_input() -> PromptSession:
+    global _INPUT_SESSION
+    if _INPUT_SESSION is None:
+        _INPUT_SESSION = build_session()
+    return _INPUT_SESSION
+
+
+def _get_chat() -> PromptSession:
+    global _CHAT_SESSION
     if _CHAT_SESSION is None:
-        _CHAT_SESSION = builder()
+        _CHAT_SESSION = build_session()
     return _CHAT_SESSION
+
+
+def _get_settings() -> PromptSession:
+    global _SETTINGS_SESSION
+    if _SETTINGS_SESSION is None:
+        _SETTINGS_SESSION = build_session(_SETTINGS_ACTIONS)
+    return _SETTINGS_SESSION
 
 
 def _label_to_formatted(label) -> FormattedText:
@@ -137,24 +119,27 @@ def _label_to_formatted(label) -> FormattedText:
 async def ask_menu(label=None) -> str:
     if label is None:
         label = prompt_tag("prompt", "> ")
-    label = _label_to_formatted(label)
-    return await _get("menu", build_menu_session).prompt_async(label)
+    return await _get_menu().prompt_async(_label_to_formatted(label))
+
+
+async def ask_settings(label=None) -> str:
+    if label is None:
+        label = prompt_tag("prompt", "settings> ")
+    return await _get_settings().prompt_async(_label_to_formatted(label))
 
 
 async def ask_input(label=None) -> str:
     if label is None:
         label = prompt_tag("prompt", "> ")
-    label = _label_to_formatted(label)
-    return await _get("input", build_input_session).prompt_async(label)
+    return await _get_input().prompt_async(_label_to_formatted(label))
 
 
 async def ask_multiline(label=None) -> str:
     if label is None:
         label = prompt_tag("prompt", "Prompt: ")
-    label = _label_to_formatted(label)
-    session = _get("chat", build_chat_session)
+    session = _get_chat()
     while True:
-        text = await session.prompt_async(label)
+        text = await session.prompt_async(_label_to_formatted(label))
         if text == S_CANCEL:
             raise KeyboardInterrupt
         if text.strip():

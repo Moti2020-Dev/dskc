@@ -1,13 +1,15 @@
 import datetime
 import json
 from .paths import CHATS_FILE, HISTORY_DIR
+from .debug import dbg
 
 
 def load_chats() -> dict:
     if CHATS_FILE.exists():
         try:
             return json.loads(CHATS_FILE.read_text())
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as e:
+            dbg("chats load failed", str(e))
             return {"chats": {}}
     return {"chats": {}}
 
@@ -27,12 +29,14 @@ def update_chat(chat_id: str, title: str | None = None,
         entry["parent_message_id"] = parent_message_id
     entry["last_used"] = datetime.datetime.now().isoformat()
     save_chats(stored)
+    dbg("chat updated", (chat_id[:8], title, parent_message_id))
 
 
 def delete_chat(chat_id: str):
     stored = load_chats()
     stored.get("chats", {}).pop(chat_id, None)
     save_chats(stored)
+    dbg("chat deleted", chat_id[:8])
 
 
 def _history_path(chat_id: str):
@@ -54,9 +58,10 @@ def append_history(chat_id: str, role: str, content: str):
         "at": datetime.datetime.now().isoformat(),
     })
     p.write_text(json.dumps(data, indent=2))
+    dbg("history appended", (chat_id[:8], role, len(content)))
 
 
-def load_history(chat_id: str) -> dict | None:
+def load_history(chat_id: str):
     p = _history_path(chat_id)
     if not p.exists():
         return None

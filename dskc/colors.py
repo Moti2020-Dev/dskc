@@ -1,5 +1,5 @@
-import re
 from lib_color import Color, Markdown, RESET
+from .debug import dbg
 
 
 def render_markdown(text: str) -> str:
@@ -44,6 +44,7 @@ def _apply_custom_line(line: str) -> str:
                     g = (value >> 8) & 0xFF
                     b = value & 0xFF
                     result.append(Color.Basic.fg(r, g, b))
+                    dbg("hex fg", (r, g, b))
                     i = k + 1
                     continue
 
@@ -58,6 +59,7 @@ def _apply_custom_line(line: str) -> str:
                     g = (value >> 8) & 0xFF
                     b = value & 0xFF
                     result.append(Color.Basic.bg(r, g, b))
+                    dbg("hex bg", (r, g, b))
                     i = k + 1
                     continue
 
@@ -72,6 +74,9 @@ def _apply_custom_line(line: str) -> str:
                         wrapped = fn(sentinel)
                         if sentinel in wrapped:
                             result.append(wrapped.split(sentinel)[0])
+                            dbg("preset fg", preset)
+                    else:
+                        dbg("preset fg unknown", preset)
                     i = k + 1
                     continue
 
@@ -89,6 +94,9 @@ def _apply_custom_line(line: str) -> str:
                             prefix = prefix.replace("[38;2;", "[48;2;")
                             prefix = prefix.replace("[38;5;", "[48;5;")
                             result.append(prefix)
+                            dbg("preset bg", preset)
+                    else:
+                        dbg("preset bg unknown", preset)
                     i = k + 1
                     continue
 

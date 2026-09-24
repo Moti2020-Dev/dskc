@@ -4,30 +4,37 @@ from lib_color import Color
 from . import config
 from .api import send_message, fetch_chat_title
 from .colors import render_markdown
+from .debug import dbg
 from .export import export_chat_markdown
 from .sessions import ask_multiline
-from .storage import update_chat, append_history
+from .storage import update_chat, append_history, load_chats
 from .themes import tag
+
+
+_TITLE_RE = re.compile(r"^\\\{([^}]*)\}\\\s*\n?", re.MULTILINE)
 
 
 def _hyperlink(url: str, label: str) -> str:
     return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
 
 
-_TITLE_RE = __import__("re").compile(r"^\\\{([^}]*)\}\\\s*\n?", __import__("re").MULTILINE)
-
-
-def _extract_title(text: str) -> tuple[str | None, str]:
+def _extract_title(text: str):
     m = _TITLE_RE.match(text)
     if m:
         return m.group(1).strip(), text[m.end():]
     return None, text
 
 
-async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
+async def chat_loop(session, token, chat_id: str, parent_message_id,
                     first_turn: bool):
     url = f"https://chat.deepseek.com/a/chat/s/{chat_id}"
-    print(tag("dim", "  Chat: ") + tag("link", _hyperlink(url, url)))
+    title = load_chats().get("chats", {}).get(chat_id, {}).get("title", "(untitled)")
+    print(
+        tag("dim", "  Chat: ")
+        + tag("info", title)
+        + tag("dim", " — ")
+        + tag("link", _hyperlink(url, url))
+    )
     print(tag("dim", "  Enter: submit  |  Ctrl+O: newline"))
     print(tag("dim", "  Ctrl+C: back to menu  |  Ctrl+D or 'stop': quit"))
 
@@ -81,6 +88,7 @@ async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
                 print(Color.MessagePresets.Warning("  No history to export yet."))
             continue
 
+        dbg("user message", (len(stripped), stripped[:60]))
         append_history(chat_id, "user", stripped)
 
         try:
@@ -98,6 +106,7 @@ async def chat_loop(session, token, chat_id: str, parent_message_id: int | None,
 
         title_from_reply, reply = _extract_title(reply)
         if title_from_reply:
+            dbg("title from reply", title_from_reply)
             update_chat(chat_id, title=title_from_reply)
 
         append_history(chat_id, "assistant", reply)

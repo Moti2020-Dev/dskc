@@ -1,6 +1,7 @@
 from prompt_toolkit.formatted_text import FormattedText
 from lib_color import Color, RESET
 from . import config
+from .debug import dbg
 
 
 BUILTIN_THEME = {
@@ -29,10 +30,11 @@ def get_theme() -> dict:
     merged = dict(BUILTIN_THEME)
     merged.update(base)
     merged.update(chosen)
+    dbg("theme resolved", name, True)
     return merged
 
 
-def theme_rgb(name: str) -> tuple[int, int, int] | None:
+def theme_rgb(name: str):
     value = get_theme().get(name)
     if not value:
         return None
@@ -44,7 +46,6 @@ def theme_rgb(name: str) -> tuple[int, int, int] | None:
 
 
 def tag(name: str, text: str) -> str:
-    """ANSI-colored text, for use with print()."""
     rgb = theme_rgb(name)
     if rgb is None:
         return text
@@ -53,7 +54,6 @@ def tag(name: str, text: str) -> str:
 
 
 def prompt_tag(name: str, text: str) -> FormattedText:
-    """prompt_toolkit FormattedText with the theme color. Use for prompts only."""
     rgb = theme_rgb(name)
     if rgb is None:
         return FormattedText([("", text)])
