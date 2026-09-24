@@ -1,5 +1,0 @@
-aiohttp
-python-dotenv
-wasmtime
-numpy
-prompt_toolkit
