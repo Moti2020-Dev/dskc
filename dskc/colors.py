@@ -1,9 +1,51 @@
-from lib_color import Color, Markdown, RESET
+import re
+
+from lib_color import RESET, Color, Markdown
+
 from .debug import dbg
+
+_RAW_OPEN = "\\RAW"
+_RAW_CLOSE = "\\RAWEND"
+_PLACEHOLDER_RE = re.compile(r"\x00RAW(\d+)\x00")
 
 
 def render_markdown(text: str) -> str:
-    return Markdown.render(_apply_custom(text))
+    # 1. Extract \RAW...\RAWEND blocks into placeholders so nothing else
+    #    touches their contents.
+    raw_blocks: list[str] = []
+
+    def _stash(m):
+        raw_blocks.append(m.group(1))
+        dbg("raw block stashed", len(m.group(1)))
+        return f"\x00RAW{len(raw_blocks) - 1}\x00"
+
+    # Closed blocks on a single line
+    text = re.sub(r"\\RAW(.*?)\\RAWEND", _stash, text)
+
+    # Unclosed \RAW: treat the rest of that line as raw
+    if _RAW_OPEN in text:
+        # Process line by line so unclosed blocks only eat their own line
+        new_lines = []
+        for line in text.split("\n"):
+            if _RAW_OPEN in line and not _PLACEHOLDER_RE.search(line):
+                idx = line.index(_RAW_OPEN)
+                prefix = line[:idx]
+                rest = line[idx + len(_RAW_OPEN):]
+                raw_blocks.append(rest)
+                new_lines.append(prefix + f"\x00RAW{len(raw_blocks) - 1}\x00")
+            else:
+                new_lines.append(line)
+        text = "\n".join(new_lines)
+
+    # 2. Normal pipeline
+    processed = Markdown.render(_apply_custom(text))
+
+    # 3. Restore raw blocks verbatim
+    def _restore(m):
+        return raw_blocks[int(m.group(1))]
+
+    processed = _PLACEHOLDER_RE.sub(_restore, processed)
+    return processed
 
 
 def _apply_custom(text: str) -> str:
@@ -12,14 +54,52 @@ def _apply_custom(text: str) -> str:
     return "\n".join(rendered_lines)
 
 
+def _emit_color_fg(value: int) -> str:
+    r = (value >> 16) & 0xFF
+    g = (value >> 8) & 0xFF
+    b = value & 0xFF
+    return Color.Basic.fg(r, g, b)
+
+
+def _emit_color_bg(value: int) -> str:
+    r = (value >> 16) & 0xFF
+    g = (value >> 8) & 0xFF
+    b = value & 0xFF
+    return Color.Basic.bg(r, g, b)
+
+
 def _apply_custom_line(line: str) -> str:
     result = []
+    stack: list[str] = []
+
+    def open_scope(code: str):
+        stack.append(code)
+        result.append(code)
+
+    def close_scope():
+        if not stack:
+            result.append(RESET)
+            return
+        stack.pop()
+        result.append(RESET)
+        if stack:
+            result.append(stack[-1])
+
+    def reset_all():
+        stack.clear()
+        result.append(RESET)
+
     i = 0
     n = len(line)
     while i < n:
         if line[i] == "\\" and i + 1 < n:
+            if line.startswith("\\R!", i):
+                reset_all()
+                i += 3
+                continue
+
             if line.startswith("\\R", i):
-                result.append(RESET)
+                close_scope()
                 i += 2
                 continue
 
@@ -40,11 +120,9 @@ def _apply_custom_line(line: str) -> str:
                     c in "0123456789abcdefABCDEF" for c in line[j:k]
                 ):
                     value = int(line[j:k], 16)
-                    r = (value >> 16) & 0xFF
-                    g = (value >> 8) & 0xFF
-                    b = value & 0xFF
-                    result.append(Color.Basic.fg(r, g, b))
-                    dbg("hex fg", (r, g, b))
+                    code = _emit_color_fg(value)
+                    open_scope(code)
+                    dbg("hex fg", (hex(value), len(stack)))
                     i = k + 1
                     continue
 
@@ -55,11 +133,9 @@ def _apply_custom_line(line: str) -> str:
                     c in "0123456789abcdefABCDEF" for c in line[j:k]
                 ):
                     value = int(line[j:k], 16)
-                    r = (value >> 16) & 0xFF
-                    g = (value >> 8) & 0xFF
-                    b = value & 0xFF
-                    result.append(Color.Basic.bg(r, g, b))
-                    dbg("hex bg", (r, g, b))
+                    code = _emit_color_bg(value)
+                    open_scope(code)
+                    dbg("hex bg", (hex(value), len(stack)))
                     i = k + 1
                     continue
 
@@ -67,16 +143,26 @@ def _apply_custom_line(line: str) -> str:
                 j = i + 4
                 k = line.find("}", j)
                 if k != -1:
-                    preset = line[j:k].lower()
-                    fn = getattr(Color.ColorPresets, preset, None)
-                    if fn:
-                        sentinel = "\x00"
-                        wrapped = fn(sentinel)
-                        if sentinel in wrapped:
-                            result.append(wrapped.split(sentinel)[0])
-                            dbg("preset fg", preset)
+                    token = line[j:k].lower()
+                    if token.isdigit():
+                        idx = int(token)
+                        if 0 <= idx <= 255:
+                            code = f"\033[38;5;{idx}m"
+                            open_scope(code)
+                            dbg("256 fg", (idx, len(stack)))
+                        else:
+                            dbg("256 fg out of range", idx)
                     else:
-                        dbg("preset fg unknown", preset)
+                        fn = getattr(Color.ColorPresets, token, None)
+                        if fn:
+                            sentinel = "\x00"
+                            wrapped = fn(sentinel)
+                            if sentinel in wrapped:
+                                code = wrapped.split(sentinel)[0]
+                                open_scope(code)
+                                dbg("preset fg", (token, len(stack)))
+                        else:
+                            dbg("preset fg unknown", token)
                     i = k + 1
                     continue
 
@@ -84,19 +170,28 @@ def _apply_custom_line(line: str) -> str:
                 j = i + 4
                 k = line.find("}", j)
                 if k != -1:
-                    preset = line[j:k].lower()
-                    fn = getattr(Color.ColorPresets, preset, None)
-                    if fn:
-                        sentinel = "\x00"
-                        wrapped = fn(sentinel)
-                        if sentinel in wrapped:
-                            prefix = wrapped.split(sentinel)[0]
-                            prefix = prefix.replace("[38;2;", "[48;2;")
-                            prefix = prefix.replace("[38;5;", "[48;5;")
-                            result.append(prefix)
-                            dbg("preset bg", preset)
+                    token = line[j:k].lower()
+                    if token.isdigit():
+                        idx = int(token)
+                        if 0 <= idx <= 255:
+                            code = f"\033[48;5;{idx}m"
+                            open_scope(code)
+                            dbg("256 bg", (idx, len(stack)))
+                        else:
+                            dbg("256 bg out of range", idx)
                     else:
-                        dbg("preset bg unknown", preset)
+                        fn = getattr(Color.ColorPresets, token, None)
+                        if fn:
+                            sentinel = "\x00"
+                            wrapped = fn(sentinel)
+                            if sentinel in wrapped:
+                                prefix = wrapped.split(sentinel)[0]
+                                prefix = prefix.replace("[38;2;", "[48;2;")
+                                prefix = prefix.replace("[38;5;", "[48;5;")
+                                open_scope(prefix)
+                                dbg("preset bg", (token, len(stack)))
+                        else:
+                            dbg("preset bg unknown", token)
                     i = k + 1
                     continue
 

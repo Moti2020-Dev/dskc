@@ -11,6 +11,9 @@ export_*.md
 export_*.html
 themes.local.json
 
+# --- Ruff stuff ---
+pyproject.toml
+
 # --- Python ---
 __pycache__/
 *.py[cod]

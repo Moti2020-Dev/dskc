@@ -1,3 +1,3 @@
 """DSKC — a DeepSeek terminal client."""
 
-DEFAULT_VERSION = "V1.7"
+DEFAULT_VERSION = "V2.0"

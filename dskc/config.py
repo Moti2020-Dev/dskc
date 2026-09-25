@@ -1,9 +1,11 @@
 import json
 import os
+
 from dotenv import load_dotenv
+
 from . import DEFAULT_VERSION
-from .paths import CONFIG_FILE, THEMES_FILE
 from .debug import dbg
+from .paths import CONFIG_FILE, THEMES_FILE
 
 load_dotenv()
 

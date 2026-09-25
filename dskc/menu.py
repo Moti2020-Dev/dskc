@@ -1,20 +1,29 @@
 import asyncio
 import uuid
+
 import aiohttp
+
 from lib_color import Color
+
 from . import config
 from .api import create_chat_session
+from .banner import show_banner
 from .chat import chat_loop
 from .debug import dbg
 from .export import export_chat_markdown
 from .sessions import (
-    ask_menu, ask_input,
-    S_QUIT, S_CANCEL, S_RENAME, S_DELETE, S_EXPORT, S_SETTINGS,
+    S_CANCEL,
+    S_DELETE,
+    S_EXPORT,
+    S_QUIT,
+    S_RENAME,
+    S_SETTINGS,
+    ask_input,
+    ask_menu,
 )
 from .settings import settings_menu
-from .storage import load_chats, update_chat, delete_chat
+from .storage import delete_chat, load_chats, update_chat
 from .themes import tag
-from .banner import show_banner
 
 
 def show_menu(chats: dict):
@@ -111,10 +120,7 @@ async def menu(session, token):
 
         # Settings
         if raw == S_SETTINGS:
-            try:
-                await settings_menu()
-            except SystemExit:
-                raise
+            await settings_menu()
             continue
 
         # Rename

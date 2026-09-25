@@ -1,7 +1,8 @@
 import datetime
+
+from .debug import dbg
 from .paths import PROJECT_ROOT
 from .storage import load_chats, load_history
-from .debug import dbg
 
 
 def export_chat_markdown(chat_id: str):
@@ -17,7 +18,7 @@ def export_chat_markdown(chat_id: str):
         "",
         f"- Chat ID: `{chat_id}`",
         f"- URL: https://chat.deepseek.com/a/chat/s/{chat_id}",
-        f"- Exported: {datetime.datetime.now().isoformat()}",
+        f"- Exported: {datetime.datetime.now(datetime.UTC).isoformat()}",
         "",
         "---",
         "",

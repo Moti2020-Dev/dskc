@@ -1,5 +1,7 @@
 import re
-from lib_color import Color, RESET
+
+from lib_color import RESET, Color
+
 from .themes import tag
 
 _BANNER_GRADIENT = [
@@ -30,7 +32,7 @@ def _gradient_text(text: str) -> str:
             continue
         pos = visible.index(i)
         t = pos / max(1, len(visible) - 1)
-        idx = int(round(t * (n - 1)))
+        idx = round(t * (n - 1))
         r, g, b = stops[idx]
         out.append(f"{Color.Basic.fg(r, g, b)}{ch}")
     out.append(RESET)

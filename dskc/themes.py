@@ -1,8 +1,9 @@
 from prompt_toolkit.formatted_text import FormattedText
-from lib_color import Color, RESET
+
+from lib_color import RESET, Color
+
 from . import config
 from .debug import dbg
-
 
 BUILTIN_THEME = {
     "banner": "100,200,255",

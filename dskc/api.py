@@ -1,7 +1,8 @@
 import base64
 import json
-import aiohttp
+
 from pow_solver import DeepSeekHash
+
 from .debug import dbg
 
 
@@ -84,7 +85,7 @@ async def fetch_chat_title(session, token, chat_id: str):
             params={"count": 50},
         ) as resp:
             data = await resp.json()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         dbg("fetch_page failed", str(e))
         return None
 

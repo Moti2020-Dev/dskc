@@ -1,7 +1,8 @@
 from prompt_toolkit import PromptSession
-from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.enums import EditingMode
 from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.key_binding import KeyBindings
+
 from .themes import prompt_tag
 
 S_QUIT     = "\x00QUIT"

@@ -1,7 +1,8 @@
 import datetime
 import json
-from .paths import CHATS_FILE, HISTORY_DIR
+
 from .debug import dbg
+from .paths import CHATS_FILE, HISTORY_DIR
 
 
 def load_chats() -> dict:
@@ -27,7 +28,7 @@ def update_chat(chat_id: str, title: str | None = None,
         entry["title"] = title
     if parent_message_id is not None:
         entry["parent_message_id"] = parent_message_id
-    entry["last_used"] = datetime.datetime.now().isoformat()
+    entry["last_used"] = datetime.datetime.now(datetime.UTC).isoformat()
     save_chats(stored)
     dbg("chat updated", (chat_id[:8], title, parent_message_id))
 
@@ -55,10 +56,24 @@ def append_history(chat_id: str, role: str, content: str):
     data["messages"].append({
         "role": role,
         "content": content,
-        "at": datetime.datetime.now().isoformat(),
+        "at": datetime.datetime.now(datetime.UTC).isoformat(),
     })
     p.write_text(json.dumps(data, indent=2))
     dbg("history appended", (chat_id[:8], role, len(content)))
+
+
+def truncate_history_tail(chat_id: str, n: int = 2):
+    p = _history_path(chat_id)
+    if not p.exists():
+        return
+    try:
+        data = json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+    msgs = data.get("messages", [])
+    data["messages"] = msgs[:-n] if n > 0 else []
+    p.write_text(json.dumps(data, indent=2))
+    dbg("history truncated", (chat_id[:8], n, len(data["messages"])))
 
 
 def load_history(chat_id: str):

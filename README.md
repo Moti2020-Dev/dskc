@@ -31,12 +31,36 @@ A terminal client for DeepSeek's web chat. Talks to the same backend the browser
 - **Auto-titling** — the model prepends `\{Title}\`; the client strips and saves it
 - **Server title fallback** — fetches the title from the server if the model doesn't send one
 
+### Conversation control
+
+- **`:retry`** — resend the last message with the same parent to get a different reply
+- **`:edit`** — replace the last message with new text and resend
+- **`:undo`** — remove the last exchange from local history
+
+All three use the same trick: reuse the `parent_message_id` of the previous turn so the server treats the new message as a sibling of the old one. Branching works the same way it does in the browser.
+
 ### Chat features
 
 - **Browser link** — OSC-8 hyperlink to `chat.deepseek.com/a/chat/s/{uuid}` above the prompt
 - **Per-chat history** — every message appended to `history/{uuid}.json`
 - **Markdown export** — writes `export_{uuid}.md` with full transcript
 - **Autosend** — a message sent automatically at the start of every new chat; useful for teaching the model a style guide
+
+### Reference commands
+
+Type `:help` in a chat to see them all.
+
+| Command | Output |
+|---|---|
+| `:help` | List of all chat commands |
+| `:colors` | Every preset rendered in its own color, plus a 256-palette strip |
+| `:syntax` | Custom escape reference table |
+| `:keys` | All key bindings across menu, settings, chat |
+| `:aitemplate` | The autosend template, ready to copy |
+| `:export` | Export this chat to markdown |
+| `:retry` | Resend the last message |
+| `:edit` | Edit and resend the last message |
+| `:undo` | Remove the last exchange from local history |
 
 ### Rendering
 
@@ -46,18 +70,24 @@ A terminal client for DeepSeek's web chat. Talks to the same backend the browser
 - **Custom color syntax** the model can use in replies:
   - `\C:{preset}text` — foreground preset
   - `\B:{preset}text` — background preset
+  - `\C:{N}text` — foreground 256-palette index
+  - `\B:{N}text` — background 256-palette index
   - `\Cx{RRGGBB}text` — foreground hex
   - `\Bx{RRGGBB}text` — background hex
   - `\U:on` / `\U:off` — underline
-  - `\R` — reset
+  - `\R` — close innermost color
+  - `\R!` — reset all colors
+  - `\RAW...\RAWEND` — show codes literally
 - **Auto reset at newlines** — no need to close spans
+- **Nested color stack** — `\R` pops one level, re-emits the parent
 - **Named presets** — `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray`, plus 16 ANSI variants
+- **Raw blocks** — `\RAW` / `\RAWEND` emit text verbatim, blocking both escapes and markdown
 
 ### Theming
 
 - **`themes.json`** — every UI color as a named tag; edit the file to add new themes
 - **Semantic tags** — `banner`, `prompt`, `error`, `success`, `dim`, `chat_num`, `link`, etc.
-- **Built-in themes** — `default`, `dracula`, `nord`
+- **Built-in themes** — `default`, `dracula`, `nord`, `sunset`, `ocean`, `forest`, `mono`
 - **Live switching** — `s` → `t` picks a theme
 - **Fallback chain** — missing theme → `default` → built-in → no color
 
@@ -70,7 +100,7 @@ A terminal client for DeepSeek's web chat. Talks to the same backend the browser
 - **Context-aware keys** — single-key actions only fire on an empty buffer; typed text is unaffected
 - **Multiline input** — `Enter` submits, `Ctrl+O` inserts a newline, `Esc` cancels
 - **Ctrl+C / Ctrl+D** — `Ctrl+C` returns to the menu, `Ctrl+D` exits
-- **Keywords** — `stop`, `quit`, `exit`, `:export`
+- **Keywords** — `stop`, `quit`, `exit`, `:export`, `:retry`, `:edit`, `:undo`
 
 ### Diagnostics
 
@@ -85,6 +115,7 @@ A terminal client for DeepSeek's web chat. Talks to the same backend the browser
 
 - **Modular layout** — `dskc/` with one file per concern
 - **`--test`** — renders a markdown sample and exits
+- **Ruff-clean** — `pyproject.toml` limits checks to `E`, `F`, `I`
 - **Local storage** — all data next to `main.py`
 - **No global state** — sessions and caches live in well-defined modules
 
@@ -93,22 +124,36 @@ A terminal client for DeepSeek's web chat. Talks to the same backend the browser
 ## Requirements
 
 - Python 3.10 or newer
-- A C++17 compiler only if you install `aiodeepseek` (not required for the WASM path)
 - A terminal with 256-color or truecolor support (Konsole, GNOME Terminal, iTerm2, Kitty, WezTerm, Windows Terminal all work)
+
+---
 
 ## Installation
 
+### 1. Clone the repository
+
 ```bash
-git clone <your-repo-url> ~/code/AI
+git clone https://github.com/Moti2020-Dev/dskc.git ~/code/AI
 cd ~/code/AI
+```
+
+### 2. Create a virtual environment
+
+```bash
 python3 -m venv .venv
-source .venv/bin/activate    # Windows: .venv\Scripts\activate
+source .venv/bin/activate       # Linux / macOS
+# .venv\Scripts\activate        # Windows (cmd)
+# .venv\Scripts\Activate.ps1    # Windows (PowerShell)
+```
+
+### 3. Install dependencies
+
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## Setup
-
-### 1. Get the WASM PoW solver
+### 4. Get the WASM PoW solver
 
 Download `sha3_wasm_bg.7b9ca65ddd.wasm` and place it at:
 
@@ -116,13 +161,16 @@ Download `sha3_wasm_bg.7b9ca65ddd.wasm` and place it at:
 ~/code/AI/wasm/sha3_wasm_bg.7b9ca65ddd.wasm
 ```
 
-Sources: [dskpp](https://github.com/Fundiman/dskpp), [Chat2API](https://github.com/lz-star/deepseek-free-api), or extract it from the DeepSeek frontend bundle.
+Sources:
 
-### 2. Get your `userToken`
+- [dskpp](https://github.com/Fundiman/dskpp) — `wasm/sha3_wasm_bg.7b9ca65ddd.wasm`
+- [Chat2API](https://github.com/lz-star/deepseek-free-api) — extracted from the frontend bundle
+
+### 5. Get your `userToken`
 
 1. Log in to [chat.deepseek.com](https://chat.deepseek.com)
 2. Open DevTools (F12) → **Application** → **Local Storage** → `https://chat.deepseek.com`
-3. Copy the value of the key `userToken`
+3. Copy the value of the `userToken` key
 
 Or from the browser **Console**:
 
@@ -130,13 +178,13 @@ Or from the browser **Console**:
 JSON.parse(localStorage.getItem("userToken")).value
 ```
 
-### 3. Create `.env`
+### 6. Create `.env`
 
-```
-DEEPSEEK_TOKEN=your_copied_userToken_here
+```bash
+echo "DEEPSEEK_TOKEN=your_copied_userToken_here" > .env
 ```
 
-### 4. Verify
+### 7. Verify
 
 ```bash
 python3 -c "from dskc.config import get_token; print('token:', get_token() is not None)"
@@ -144,13 +192,15 @@ python3 -c "from dskc.config import get_token; print('token:', get_token() is no
 
 Should print `token: True`.
 
----
-
-## Usage
+### 8. Run
 
 ```bash
 python3 main.py
 ```
+
+---
+
+## Usage
 
 You'll see the menu:
 
@@ -160,7 +210,7 @@ You'll see the menu:
  ▌     a command-line client                ▐
  ▙▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
 
-  V1.7  [default]
+  V2.0  [default]
   ──────────────────────────────────────────────
     1.  My First Chat  [88bab68d]
     2.  Debugging Session  [f51ae83f]
@@ -188,7 +238,7 @@ You'll see the menu:
 
 | Key | Action |
 |---|---|
-| `a` | Edit the autosend message |
+| `a` | Edit the autosend message (type `r` on a fresh line to reset to template) |
 | `t` | Pick a theme |
 | `v` | Change the version string |
 | `b` | Back to the main menu |
@@ -204,7 +254,15 @@ You'll see the menu:
 | `Ctrl+D` | Quit the program |
 | `stop` | Quit the program |
 | `quit` / `exit` | Back to menu |
-| `:export` | Export the current chat |
+| `:help` | List all commands |
+| `:colors` | Show every preset in its own color |
+| `:syntax` | Show the escape syntax reference |
+| `:keys` | Show all key bindings |
+| `:aitemplate` | Print the autosend template |
+| `:export` | Export this chat to markdown |
+| `:retry` | Resend the last message |
+| `:edit` | Edit and resend the last message |
+| `:undo` | Remove the last exchange from local history |
 
 ### Flags
 
@@ -219,33 +277,22 @@ python3 main.py --test     # render a markdown sample and exit
 
 DeepSeek doesn't emit `\C:{cyan}` or `\Cx{FF5733}` on its own. You have to tell it to. The **autosend** feature handles this: configure a message once and it's sent automatically at the start of every new chat.
 
-Suggested autosend message:
+The full template lives in `dskc/reference.py` as `AUTOSEND_TEMPLATE`, and you can print it any time with:
 
 ```
-You are replying to a terminal client that renders ANSI colors and basic markdown.
-
-Markdown is rendered: # headers, **bold**, *italic*, ~~strikethrough~~, `code`, ``` fenced blocks ```, - lists, > quotes, [links](url).
-
-You can also color text with these codes:
-  \C:{preset}text     foreground preset
-  \B:{preset}text     background preset
-  \Cx{RRGGBB}text     foreground hex
-  \Bx{RRGGBB}text     background hex
-  \U:on / \U:off      underline
-  \R                  reset
-
-Braces go around the preset name or hex value ONLY, never around the text.
-A reset is applied automatically at every newline, so no closing code is needed.
-No nesting. No color codes inside code fences.
-
-Presets: black, red, green, yellow, blue, magenta, cyan, white, gray, plus ansi_* and ansi_bright_* variants.
-
-Use color tastefully — headings, warnings, emphasis, status. Not every word.
-
-Confirm and wait for my next message.
+:aitemplate
 ```
 
-Set it via `s` → `a` in the menu.
+Copy the block, then set it via `s` → `a`. If you want to reset the autosend to the shipped template later, type `r` on a fresh line when editing autosend.
+
+The template covers:
+
+- Markdown syntax the renderer handles
+- Custom color codes with examples
+- The `\RAW...\RAWEND` literal block
+- Nesting rules for `\R` and `\R!`
+- The full preset list
+- A tastefulness reminder
 
 ---
 
@@ -266,12 +313,14 @@ Set it via `s` → `a` in the menu.
 │   ├── banner.py              # gradient banner
 │   ├── sessions.py            # prompt_toolkit sessions + ask helpers
 │   ├── settings.py            # settings submenu
+│   ├── reference.py           # command reference + autosend template
 │   ├── menu.py                # main menu
 │   └── chat.py                # chat loop
 ├── lib_color.py               # ANSI color + markdown library
 ├── pow_solver.py              # WASM PoW wrapper
 ├── wasm/
 │   └── sha3_wasm_bg.7b9ca65ddd.wasm
+├── pyproject.toml             # ruff config
 ├── requirements.txt
 ├── .env                       # DEEPSEEK_TOKEN (gitignored)
 ├── config.json                # autosend, version, theme (gitignored)
@@ -291,13 +340,43 @@ The client parses these escapes in the model's replies and in anything you type:
 |---|---|
 | `\C:{preset}text` | Foreground preset |
 | `\B:{preset}text` | Background preset |
+| `\C:{N}text` | Foreground 256-palette index (0–255) |
+| `\B:{N}text` | Background 256-palette index (0–255) |
 | `\Cx{RRGGBB}text` | Foreground hex |
 | `\Bx{RRGGBB}text` | Background hex |
 | `\U:on` | Start underline |
 | `\U:off` | End underline |
-| `\R` | Reset all attributes |
+| `\R` | Close innermost color |
+| `\R!` | Reset all colors |
+| `\RAW...\RAWEND` | Show codes literally |
 
 Each color escape runs from where it appears to the next escape or end of line. A reset is applied automatically at every newline.
+
+### Nesting and reset
+
+The parser keeps a stack of active colors. `\R` pops one level and re-emits the parent color. `\R!` clears the whole stack.
+
+```
+\C:{cyan}outer \C:{red}inner\R back to cyan\R default
+```
+
+Renders as cyan, then red, then cyan, then default.
+
+### Raw blocks
+
+`\RAW...\RAWEND` emits text verbatim — no colors, no markdown, no parsing. Useful when the model wants to show a code without triggering it.
+
+```
+Write \RAW\C:{cyan}text\RAWEND to color text cyan.
+```
+
+Renders as:
+
+```
+Write \C:{cyan}text to color text cyan.
+```
+
+Raw blocks don't span lines and don't nest. If `\RAWEND` is missing, the rest of the line is treated as raw.
 
 ### Presets
 
@@ -317,6 +396,15 @@ ansi_bright_yellow, ansi_bright_blue, ansi_bright_magenta,
 ansi_bright_cyan, ansi_bright_white
 ```
 
+**256-palette indices:** any number 0–255. Common ranges:
+
+- 0–7: standard colors
+- 8–15: bright colors
+- 16–231: 6×6×6 RGB cube
+- 232–255: grayscale ramp
+
+Run `:colors` in a chat to see the full palette rendered.
+
 Preset names are case-insensitive. Hex digits are case-insensitive.
 
 ### Examples
@@ -324,10 +412,12 @@ Preset names are case-insensitive. Hex digits are case-insensitive.
 ```
 \C:{cyan}This whole line is cyan.
 \C:{red}Red text \C:{yellow}then yellow \C:{green}then green.
+\C:{142}Palette index 142.
 \Cx{FF5733}Orange from hex.
 \B:{blue}Blue background for this line.
 \Bx{330033}\Cx{00FFCC}Teal on dark purple.
 \U:onUnderlined text\U:off back to normal.
+\RAW\C:{cyan}text\RAWEND shows the codes literally.
 ```
 
 ---
@@ -367,6 +457,8 @@ Create `themes.json` next to `main.py`. Each theme is a flat dictionary of seman
 
 Any tag you omit falls back to the `default` theme's value, and then to a built-in default. Add as many themes as you want. Switch with `s` → `t`.
 
+Shipped themes: `default`, `dracula`, `nord`, `sunset`, `ocean`, `forest`, `mono`.
+
 ---
 
 ## Configuration files
@@ -389,10 +481,15 @@ Any tag you omit falls back to the `default` theme's value, and then to a built-
 Run this from the project root:
 
 ```bash
-python3 -c "import dskc.config, dskc.themes, dskc.colors, dskc.storage, dskc.api, dskc.sessions, dskc.settings, dskc.menu, dskc.chat, dskc.banner, dskc.export; print('all ok')"
+python3 -c "import dskc.config, dskc.themes, dskc.colors, dskc.storage, dskc.api, dskc.sessions, dskc.settings, dskc.menu, dskc.chat, dskc.banner, dskc.export, dskc.reference; print('all ok')"
 ```
 
-If it fails, the traceback names the exact file and symbol. For static checks, install [ruff](https://docs.astral.sh/ruff/) and run `ruff check dskc/`.
+If it fails, the traceback names the exact file and symbol. For static checks:
+
+```bash
+pip install ruff
+ruff check dskc/
+```
 
 ### Colors aren't rendering
 
@@ -432,13 +529,17 @@ Re-download from the sources above if needed.
 
 Your `userToken` has expired or been invalidated. Re-extract it from Local Storage and update `.env`.
 
+### `:retry` or `:edit` produced a weird result
+
+These commands reuse the `parent_message_id` of the previous turn to branch the conversation. After a retry or edit, the server has two replies under the same parent. The web UI may show one; your terminal shows whichever you just received. Refreshing the browser chat typically resolves any confusion.
+
 ### `Ctrl+D` quits instead of `Ctrl+C`
 
-That's by design: `Ctrl+C` cancels the current action and returns to the menu; `Ctrl+D` exits the program. If you want different semantics, edit the `except` clauses in `dskc/sessions.py`.
+That's by design: `Ctrl+C` cancels the current action and returns to the menu; `Ctrl+D` exits the program. To change this, edit the `except` clauses in `dskc/sessions.py`.
 
 ### The AI's replies have escape codes in them, but they show as literal text
 
-The model is emitting codes the parser doesn't recognize. Run with `--debug` and look for lines like `[DEBUG] preset fg unknown = <name>`. The autosend message might need updating, or the model drifted. Re-send the style guide mid-chat.
+The model is emitting codes the parser doesn't recognize. Run with `--debug` and look for lines like `[DEBUG] preset fg unknown = <name>`. The autosend message may need updating, or the model drifted. Re-send the style guide mid-chat, or run `:aitemplate` to refresh the reference.
 
 ---
 
@@ -453,10 +554,11 @@ The model is emitting codes the parser doesn't recognize. Run with `--debug` and
 ## Limitations
 
 - **Uses an undocumented internal API.** DeepSeek may change it without notice. If the client breaks, check the endpoints in `dskc/api.py`.
-- **Not a replacement for the official API.** If you want a stable, supported interface with an API key, use [api.deepseek.com](https://api.deepseek.com).
-- **Nested color spans are not supported.** Each `\C:` / `\B:` runs to the next escape or end of line.
+- **Not a replacement for the official API.** For a stable, supported interface with an API key, use [api.deepseek.com](https://api.deepseek.com).
 - **No streaming display.** Replies are printed in full once the stream completes. Adding live streaming would require a state machine for markdown and custom escapes.
 - **No file uploads.** The client doesn't handle `ref_file_ids`.
+- **Raw blocks are line-scoped.** `\RAW...\RAWEND` doesn't cross newlines.
+- **`:retry` and `:edit` leave orphaned replies on the server.** Both versions stay in the chat tree; the web UI may show one, your terminal shows the one you received.
 
 ---
 
@@ -466,18 +568,25 @@ The `dskc/` package is organized so each module has a single responsibility. Whe
 
 | Feature type | Touch these files |
 |---|---|
-| New color escape | `dskc/colors.py` |
+| New color escape | `dskc/colors.py`, `dskc/reference.py` |
 | New theme tag | `dskc/themes.py`, `themes.json` |
+| New chat command | `dskc/reference.py` (dispatch table), `dskc/chat.py` (if it needs state) |
 | New menu action | `dskc/sessions.py` (sentinel + binding), `dskc/menu.py` (dispatch) |
 | New setting | `dskc/config.py` (getter/setter), `dskc/settings.py` (UI) |
 | New API endpoint | `dskc/api.py` |
 | New export format | `dskc/export.py`, `dskc/menu.py` (branch) |
 
+Run ruff before committing:
+
+```bash
+ruff check dskc/
+```
+
 ---
 
 ## License
 
-MIT
+Whatever you want. Personal project, no warranty. Use at your own risk.
 
 ---
 

@@ -1,6 +1,7 @@
 # dskc/debug.py
 import sys
-from lib_color import Color, RESET
+
+from lib_color import RESET, Color
 
 _SEEN = set()
 

@@ -1,9 +1,15 @@
 from lib_color import Color
-from . import config
+
+from . import config, reference
 from .debug import dbg
 from .sessions import (
-    ask_settings, ask_input,
-    S_CANCEL, S_BACK, S_AUTOSEND, S_THEME, S_VERSION,
+    S_AUTOSEND,
+    S_BACK,
+    S_CANCEL,
+    S_THEME,
+    S_VERSION,
+    ask_input,
+    ask_settings,
 )
 from .themes import tag
 
@@ -28,6 +34,34 @@ def _show_settings_menu():
     print()
 
 
+async def _edit_autosend():
+    print(Color.Format.dim(
+        "  Enter autosend message. Enter = submit, Ctrl+O = newline."
+    ))
+    print(Color.Format.dim(
+        "  Empty = clear.  Type 'r' on a fresh line to reset to the template."
+    ))
+    try:
+        new_text = (await ask_input("Autosend: ")).strip()
+    except EOFError:
+        raise SystemExit(0)
+    except KeyboardInterrupt:
+        print()
+        return
+    if new_text == S_CANCEL:
+        return
+    if new_text.lower() == "r":
+        config.set_autosend(reference.get_aitemplate())
+        print(Color.MessagePresets.Success("  Autosend reset to template."))
+        return
+    config.set_autosend(new_text)
+    dbg("settings: autosend set", len(new_text))
+    if new_text:
+        print(Color.MessagePresets.Success("  Autosend set."))
+    else:
+        print(Color.MessagePresets.Success("  Autosend cleared."))
+
+
 async def settings_menu() -> None:
     while True:
         _show_settings_menu()
@@ -48,24 +82,7 @@ async def settings_menu() -> None:
             raise SystemExit(0)
 
         if raw == S_AUTOSEND:
-            try:
-                print(Color.Format.dim(
-                    "  Enter autosend message. Enter = submit, Ctrl+O = newline. Empty = clear."
-                ))
-                new_text = (await ask_input("Autosend: ")).strip()
-            except EOFError:
-                raise SystemExit(0)
-            except KeyboardInterrupt:
-                print()
-                continue
-            if new_text == S_CANCEL:
-                continue
-            config.set_autosend(new_text)
-            dbg("settings: autosend set", len(new_text))
-            if new_text:
-                print(Color.MessagePresets.Success("  Autosend set."))
-            else:
-                print(Color.MessagePresets.Success("  Autosend cleared."))
+            await _edit_autosend()
             continue
 
         if raw == S_THEME:
@@ -108,5 +125,4 @@ async def settings_menu() -> None:
                 print(Color.MessagePresets.Success(f"  Version set to {new_ver}."))
             continue
 
-        # Unknown input at settings
         print(Color.MessagePresets.Error("  Invalid input."))
