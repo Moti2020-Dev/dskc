@@ -539,6 +539,14 @@ def render_markdown(text: str) -> str:
     return Markdown.render(text)
 
 
+    
+_ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI SGR sequences from text."""
+    return _ANSI_RE.sub("", text)
+    
 if __name__ == "__main__":
     sample = (
         "# Heading 1\n"

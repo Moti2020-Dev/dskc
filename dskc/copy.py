@@ -1,32 +1,12 @@
-"""
-Copy Containers + clipboard helpers.
-
-The model emits blocks like:
-
-    copy:BlockName
-    ... content ...
-    endcopy
-
-The parser stashes the content under the block name and replaces it in the
-rendered output with a dim marker. The user can then type /copy BlockName
-to place the content on the clipboard.
-
-Clipboard uses OSC 52 which most modern terminals support. Falls back to
-printing the content to stdout when the user disables OSC 52 or the terminal
-does not understand it.
-"""
-
 import base64
 import re
 import sys
 
+from lib_color import Color
 from . import config
+from lib_color import strip_ansi
 from .debug import dbg
 
-
-# ---------------------------------------------------------------------
-# Container parsing
-# ---------------------------------------------------------------------
 
 _CONTAINER_RE = re.compile(
     r"^copy:([A-Za-z_][A-Za-z0-9_]*)[ \t]*\n(.*?)\nendcopy[ \t]*$",
@@ -35,8 +15,6 @@ _CONTAINER_RE = re.compile(
 
 
 class ContainerStore:
-    """Per-reply store of copy containers."""
-
     def __init__(self):
         self.blocks: dict[str, str] = {}
 
@@ -55,29 +33,18 @@ class ContainerStore:
 
 
 def extract_containers(text: str, store: ContainerStore) -> str:
-    """
-    Find copy:NAME ... endcopy blocks, stash them in the store, replace
-    each with a dim marker in the visible text.
-    """
     def _stash(m):
         name = m.group(1)
         content = m.group(2)
         store.add(name, content)
-        marker = f"\033[2m[Block: {name}]\033[22m"
-        return marker
+        return f"\033[2m[Block: {name}]\033[22m"
 
     return _CONTAINER_RE.sub(_stash, text)
 
 
-# ---------------------------------------------------------------------
-# Clipboard emission
-# ---------------------------------------------------------------------
-
 def _osc52(payload: str) -> bool:
-    """Emit an OSC 52 sequence to copy payload to the system clipboard."""
     try:
         b64 = base64.b64encode(payload.encode("utf-8")).decode("ascii")
-        # OSC 52 ; c ; <base64> ST
         sys.stdout.write(f"\033]52;c;{b64}\007")
         sys.stdout.flush()
         return True
@@ -87,79 +54,97 @@ def _osc52(payload: str) -> bool:
 
 
 def copy_to_clipboard(text: str) -> bool:
-    """
-    Copy text to the system clipboard. Respects the config preference.
-    Returns True if something was sent to the terminal.
-    """
     mode = config.get_clipboard()
     if mode == "stdout":
         print(text)
         return True
-    # auto or osc52
     ok = _osc52(text)
     if not ok:
         print(text)
     return ok
 
 
-# ---------------------------------------------------------------------
-# Command handling
-# ---------------------------------------------------------------------
-
-def parse_args(args: str) -> tuple[dict, list[str]]:
-    """
-    Split arguments into flags and positional names.
-    Supports --rendered and --chat.
-    """
-    flags = {"rendered": False, "chat": False}
-    names = []
+def _parse_args(args: str) -> tuple[set[str], list[str]]:
+    flags: set[str] = set()
+    names: list[str] = []
     for token in args.split():
-        if token == "--rendered":
-            flags["rendered"] = True
-        elif token == "--chat":
-            flags["chat"] = True
+        if token.startswith("--"):
+            flags.add(token)
         else:
             names.append(token)
     return flags, names
 
 
-def handle_copy(args: str, store: ContainerStore, chat_id: str | None,
-                render_fn) -> bool:
+def handle_copy(args: str, store: ContainerStore,
+                last_reply_raw: str | None,
+                last_reply_rendered: str | None,
+                chat_render_fn) -> bool:
     """
-    Handle /copy from the chat prompt. Returns True if handled.
-    render_fn: callable that takes a chat_id and returns (raw_markdown, rendered)
+    :copy                      list available containers
+    :copy <name>               copy the named container (raw)
+    :copy --last               copy the last reply (raw markdown)
+    :copy --chat               copy the whole chat (raw markdown)
+    :copy --rendered           with ANSI codes (applies to --last / --chat)
+    :copy --plain              strip ANSI before copying
     """
-    flags, names = parse_args(args)
+    flags, names = _parse_args(args)
 
-    if flags["chat"]:
-        if chat_id is None:
-            print("  No chat to export.")
-            return True
-        result = render_fn(chat_id)
+    # 1. Whole chat
+    if "--chat" in flags:
+        result = chat_render_fn()
         if result is None:
-            print("  No history to copy.")
+            print(Color.MessagePresets.Warning("  No history to copy."))
             return True
-        raw, rendered = result
-        payload = rendered if flags["rendered"] else raw
+        payload = result
+        if "--rendered" not in flags:
+            payload = strip_ansi(payload)
+        if "--plain" in flags:
+            payload = strip_ansi(payload)
         copy_to_clipboard(payload)
-        print(f"  Copied chat as {'rendered' if flags['rendered'] else 'markdown'}.")
+        print(Color.MessagePresets.Success(
+            f"  Copied chat ({len(payload)} chars)."
+        ))
         return True
 
-    if not names:
-        if not store.names():
-            print("  No blocks available. Ask the model to emit copy:NAME...endcopy.")
+    # 2. Last reply
+    if "--last" in flags:
+        if last_reply_raw is None:
+            print(Color.MessagePresets.Warning("  No reply to copy yet."))
             return True
-        print("  Available blocks:")
-        for name in store.names():
-            print(f"    {name}")
+        if "--rendered" in flags and last_reply_rendered is not None:
+            payload = last_reply_rendered
+        else:
+            payload = last_reply_raw
+        if "--plain" in flags:
+            payload = strip_ansi(payload)
+        copy_to_clipboard(payload)
+        print(Color.MessagePresets.Success(
+            f"  Copied last reply ({len(payload)} chars)."
+        ))
         return True
 
-    name = names[0]
-    content = store.get(name)
-    if content is None:
-        print(f"  No block named '{name}'.")
+    # 3. Named container (unchanged behavior)
+    if names:
+        name = names[0]
+        content = store.get(name)
+        if content is None:
+            print(Color.MessagePresets.Error(f"  No block named '{name}'."))
+            return True
+        if "--plain" in flags:
+            content = strip_ansi(content)
+        copy_to_clipboard(content)
+        print(Color.MessagePresets.Success(
+            f"  Copied '{name}' ({len(content)} chars)."
+        ))
         return True
 
-    copy_to_clipboard(content)
-    print(f"  Copied '{name}' ({len(content)} chars).")
+    # 4. Default: list containers
+    if not store.names():
+        print(Color.MessagePresets.Warning(
+            "  No blocks available. Use --last, --chat, or ask the model to emit copy:NAME...endcopy."
+        ))
+        return True
+    print(Color.Format.dim("  Available blocks:"))
+    for name in store.names():
+        print(f"    {name}")
     return True

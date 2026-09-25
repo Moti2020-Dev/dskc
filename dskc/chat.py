@@ -6,7 +6,8 @@ from .api import send_message, fetch_chat_title
 from .colors import render_markdown
 from .copy import ContainerStore, handle_copy
 from .debug import dbg
-from .export import export_chat_markdown
+from .export import export_chat_markdown, handle_save
+from .load import read_load_file
 from .notify import notify
 from .sessions import ask_multiline, ask_input, S_CANCEL
 from .storage import (
@@ -31,7 +32,7 @@ def _extract_title(text: str):
 
 
 def _chat_render_fn(chat_id: str):
-    """Return (raw_markdown, rendered) for /copy --chat."""
+    """Return (raw_markdown, rendered) for :copy --chat."""
     data = load_history(chat_id)
     if data is None:
         return None
@@ -39,9 +40,7 @@ def _chat_render_fn(chat_id: str):
     for msg in data.get("messages", []):
         role = "You" if msg.get("role") == "user" else "DeepSeek"
         parts.append(f"### {role}\n\n{msg.get('content', '')}")
-    raw = "\n\n".join(parts)
-    rendered = render_markdown(raw)
-    return raw, rendered
+    return "\n\n".join(parts)
 
 
 async def _send_and_render(session, token, chat_id, parent_message_id,
@@ -73,7 +72,6 @@ async def _send_and_render(session, token, chat_id, parent_message_id,
 
     append_history(chat_id, "assistant", reply)
 
-    # Containers are scoped to the last reply
     store.clear()
     print()
     print(render_markdown(reply, store=store))
@@ -103,13 +101,14 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
     store = ContainerStore()
     last_user_message: str | None = None
     last_parent_id = parent_message_id
+    last_reply: str | None = None
 
-    # Restore draft if there is one
-    draft = config.get_draft()
+    # Draft restore
+    draft = config.get_draft(chat_id)
     if draft:
         print(tag("dim", "  (restored unsent draft)"))
         try:
-            edited = (await ask_input(f"Draft: ")).strip()
+            edited = (await ask_input("Draft: ")).strip()
         except EOFError:
             raise SystemExit(0)
         except KeyboardInterrupt:
@@ -119,7 +118,7 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
             draft = edited
         else:
             draft = ""
-        config.clear_draft()
+        config.clear_draft(chat_id)
 
     if first_turn:
         autosend = config.get_autosend()
@@ -175,6 +174,8 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
 
         if low.startswith(":"):
             cmd, _, args = low[1:].partition(" ")
+            # Preserve original case for file paths
+            _, _, args_orig = stripped[1:].partition(" ")
 
             if cmd == "export":
                 path = export_chat_markdown(chat_id)
@@ -184,18 +185,33 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                     print(Color.MessagePresets.Warning("  No history to export yet."))
                 continue
 
-            if cmd == "copy":
+            if cmd == "save":
+                handle_save(args_orig, chat_id)
+                continue
+
+            if cmd == "load":
+                text = read_load_file(args_orig)
+                if text is None:
+                    continue
+                stripped = text
+                low = stripped.lower()
+                # fall through to normal send
+
+            elif cmd == "copy":
+                rendered = render_markdown(last_reply) if last_reply else None
                 handle_copy(
-                    args, store, chat_id,
-                    render_fn=_chat_render_fn,
+                    args_orig, store,
+                    last_reply_raw=last_reply,
+                    last_reply_rendered=rendered,
+                    chat_render_fn=lambda: _chat_render_fn(chat_id),
                 )
                 continue
 
-            if cmd == "retry":
+            elif cmd == "retry":
                 if last_user_message is None:
                     print(Color.MessagePresets.Warning("  Nothing to retry yet."))
                     continue
-                new_parent, _, _ = await _send_and_render(
+                new_parent, _, last_reply = await _send_and_render(
                     session, token, chat_id, last_parent_id,
                     last_user_message, store, truncate_before=True,
                 )
@@ -203,7 +219,7 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                 notify("DSKC", "Reply received")
                 continue
 
-            if cmd == "edit":
+            elif cmd == "edit":
                 if last_user_message is None:
                     print(Color.MessagePresets.Warning("  Nothing to edit yet."))
                     continue
@@ -220,7 +236,7 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                 if not new_text or new_text == S_CANCEL:
                     continue
                 last_user_message = new_text
-                new_parent, _, _ = await _send_and_render(
+                new_parent, _, last_reply = await _send_and_render(
                     session, token, chat_id, last_parent_id,
                     new_text, store, truncate_before=True,
                 )
@@ -228,22 +244,24 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                 notify("DSKC", "Reply received")
                 continue
 
-            if cmd == "undo":
+            elif cmd == "undo":
                 truncate_history_tail(chat_id, 2)
                 print(Color.MessagePresets.Success("  Last exchange removed from local history."))
                 continue
 
-            if reference.dispatch(cmd, args):
+            elif reference.dispatch(cmd, args):
                 continue
 
-            print(Color.MessagePresets.Error(f"  Unknown command: :{cmd}"))
-            continue
+            else:
+                print(Color.MessagePresets.Error(f"  Unknown command: :{cmd}"))
+                continue
 
+        # If we fell through from :load, stripped now holds the file contents
         dbg("user message", (len(stripped), stripped[:60]))
         last_user_message = stripped
         last_parent_id = parent_message_id
 
-        new_parent, _, _ = await _send_and_render(
+        new_parent, _, last_reply = await _send_and_render(
             session, token, chat_id, parent_message_id, stripped, store
         )
         parent_message_id = new_parent

@@ -104,17 +104,26 @@ SYNTAX_ROWS = [
 
 
 CHAT_COMMANDS = [
-    (":help",        "Show this list"),
-    (":colors",      "Show every preset rendered in itself"),
-    (":syntax",      "Show the custom escape reference"),
-    (":keys",        "Show all key bindings"),
-    (":aitemplate",  "Print the autosend template"),
-    (":export",      "Export this chat to markdown"),
-    (":retry",       "Resend the last message"),
-    (":edit",        "Edit the last message"),
-    (":undo",        "Remove the last exchange from local history"),
-    ("stop",         "Quit the program"),
-    ("quit / exit",  "Back to the menu"),
+    (":help",              "Show this list"),
+    (":colors",            "Show every preset rendered in itself"),
+    (":syntax",            "Show the custom escape reference"),
+    (":keys",              "Show all key bindings"),
+    (":aitemplate",        "Print the autosend template"),
+    (":export",            "Export this chat to markdown (auto-named)"),
+    (":save <file>",       "Write last reply to a file"),
+    (":save --chat <file>","Write whole chat to a file"),
+    (":save --append <f>", "Append instead of overwrite"),
+    (":save --no-ansi <f>","Strip ANSI before writing"),
+    (":load <file>",       "Read file and send as a message"),
+    (":retry",             "Resend the last message"),
+    (":edit",              "Edit the last message"),
+    (":undo",              "Remove the last exchange from local history"),
+    (":copy",              "List available copy blocks"),
+    (":copy --last",       "Copy the last reply to clipboard"),
+    (":copy --chat",       "Copy the whole chat to clipboard"),
+    (":copy --plain",      "Strip ANSI before copying"),
+    ("stop",               "Quit the program"),
+    ("quit / exit",        "Back to the menu"),
 ]
 
 

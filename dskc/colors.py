@@ -7,6 +7,12 @@ from .copy import ContainerStore, extract_containers
 _RAW_OPEN = "\\RAW"
 _RAW_CLOSE = "\\RAWEND"
 _PLACEHOLDER_RE = re.compile(r"\x00RAW(\d+)\x00")
+_ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI SGR sequences from text."""
+    return _ANSI_RE.sub("", text)
 
 
 def render_markdown(text: str, store: ContainerStore | None = None) -> str:
