@@ -3,16 +3,13 @@
 .env.*
 !.env.example
 
-# --- Local data (user-specific, do not commit) ---
+# --- Local user data ---
 config.json
 chats.json
 history/
 export_*.md
 export_*.html
 themes.local.json
-
-# --- Ruff stuff ---
-pyproject.toml
 
 # --- Python ---
 __pycache__/
@@ -25,6 +22,7 @@ dist/
 *.egg-info/
 *.egg
 pip-wheel-metadata/
+*.whl
 
 # --- Virtual environments ---
 .venv/
@@ -64,9 +62,18 @@ desktop.ini
 # --- Jupyter ---
 .ipynb_checkpoints/
 
-# --- Compiled / build artifacts from C extensions ---
+# --- Compiled artifacts from C extensions ---
 *.o
 *.obj
 *.pyd
 *.dll
 *.dylib
+
+# --- Local backups ---
+*.bak
+*.orig
+*.rej
+backup_*/
+
+# --- IDK ---
+pyproject.toml

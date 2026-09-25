@@ -1,4 +1,4 @@
-# DSKC — DeepSeek Client — V2.0
+# DSKC — DeepSeek Client
 
 A terminal client for DeepSeek's web chat. Talks to the same backend the browser uses, so it's free, requires no API key, and supports the same models and features. Renders markdown and true 24-bit color, persists chats locally, and lets you resume any conversation across restarts.
 
@@ -37,14 +37,25 @@ A terminal client for DeepSeek's web chat. Talks to the same backend the browser
 - **`:edit`** — replace the last message with new text and resend
 - **`:undo`** — remove the last exchange from local history
 
-All three use the same trick: reuse the `parent_message_id` of the previous turn so the server treats the new message as a sibling of the old one. Branching works the same way it does in the browser.
+All three use the same trick: reuse the `parent_message_id` of the previous turn so the server treats the new message as a sibling of the old one.
 
 ### Chat features
 
 - **Browser link** — OSC-8 hyperlink to `chat.deepseek.com/a/chat/s/{uuid}` above the prompt
 - **Per-chat history** — every message appended to `history/{uuid}.json`
 - **Markdown export** — writes `export_{uuid}.md` with full transcript
-- **Autosend** — a message sent automatically at the start of every new chat; useful for teaching the model a style guide
+- **Autosend** — a message sent automatically at the start of every new chat
+- **Draft persistence** — unsent buffer survives a Ctrl+C or crash
+- **Desktop notifications** — `notify-send` (Linux) or `osascript` (macOS) when a reply arrives
+- **Window title** — terminal shows `DSKC — {chat title}` while in a chat
+
+### Copy system
+
+- **Copy Containers** — the model writes `copy:NAME ... endcopy` and the parser extracts each block
+- **`:copy <name>`** — puts a container's content on the system clipboard via OSC 52
+- **`:copy --rendered <name>`** — copies the ANSI-rendered version
+- **`:copy --chat`** — copies the entire chat as markdown
+- **`:copy`** with no args — lists available containers
 
 ### Reference commands
 
@@ -61,6 +72,8 @@ Type `:help` in a chat to see them all.
 | `:retry` | Resend the last message |
 | `:edit` | Edit and resend the last message |
 | `:undo` | Remove the last exchange from local history |
+| `:copy <name>` | Copy a block from the last reply |
+| `:copy --chat` | Copy the whole chat as markdown |
 
 ### Rendering
 
@@ -96,11 +109,13 @@ Type `:help` in a chat to see them all.
 - **Gradient banner** with dark-blue → cyan eight-stop ramp
 - **Configurable version** shown in the banner
 - **Single-key menu actions** — `r` rename, `d` delete, `x` export, `s` settings, `q` quit
-- **Settings submenu** — autosend, theme, version under `s`
+- **Settings submenu** — autosend, theme, version, notifications under `s`
 - **Context-aware keys** — single-key actions only fire on an empty buffer; typed text is unaffected
 - **Multiline input** — `Enter` submits, `Ctrl+O` inserts a newline, `Esc` cancels
+- **Ctrl+R** — reverse search through prompt history
+- **Bracketed paste** — multi-line pastes don't submit early
 - **Ctrl+C / Ctrl+D** — `Ctrl+C` returns to the menu, `Ctrl+D` exits
-- **Keywords** — `stop`, `quit`, `exit`, `:export`, `:retry`, `:edit`, `:undo`
+- **Keywords** — `stop`, `quit`, `exit`, `:export`, `:retry`, `:edit`, `:undo`, `:copy`
 
 ### Diagnostics
 
@@ -125,6 +140,7 @@ Type `:help` in a chat to see them all.
 
 - Python 3.10 or newer
 - A terminal with 256-color or truecolor support (Konsole, GNOME Terminal, iTerm2, Kitty, WezTerm, Windows Terminal all work)
+- For desktop notifications: `notify-send` (Linux) or `osascript` (macOS). Silent if absent.
 
 ---
 
@@ -210,7 +226,7 @@ You'll see the menu:
  ▌     a command-line client                ▐
  ▙▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
 
-  V2.0  [default]
+  V3.0  [default]
   ──────────────────────────────────────────────
     1.  My First Chat  [88bab68d]
     2.  Debugging Session  [f51ae83f]
@@ -241,6 +257,7 @@ You'll see the menu:
 | `a` | Edit the autosend message (type `r` on a fresh line to reset to template) |
 | `t` | Pick a theme |
 | `v` | Change the version string |
+| `n` | Toggle desktop notifications |
 | `b` | Back to the main menu |
 
 ### Chat prompt
@@ -249,9 +266,10 @@ You'll see the menu:
 |---|---|
 | Text + Enter | Send message |
 | `Ctrl+O` | Insert a newline |
-| `Esc` | Cancel, back to menu |
-| `Ctrl+C` | Back to menu |
+| `Esc` | Cancel, back to menu (saves draft) |
+| `Ctrl+C` | Back to menu (saves draft) |
 | `Ctrl+D` | Quit the program |
+| `Ctrl+R` | Reverse search prompt history |
 | `stop` | Quit the program |
 | `quit` / `exit` | Back to menu |
 | `:help` | List all commands |
@@ -263,6 +281,9 @@ You'll see the menu:
 | `:retry` | Resend the last message |
 | `:edit` | Edit and resend the last message |
 | `:undo` | Remove the last exchange from local history |
+| `:copy <name>` | Copy a block from the last reply |
+| `:copy --rendered <name>` | Copy the ANSI-rendered version |
+| `:copy --chat` | Copy the whole chat as markdown |
 
 ### Flags
 
@@ -273,7 +294,7 @@ python3 main.py --test     # render a markdown sample and exit
 
 ---
 
-## Teaching the model the color syntax
+## Teaching the model
 
 DeepSeek doesn't emit `\C:{cyan}` or `\Cx{FF5733}` on its own. You have to tell it to. The **autosend** feature handles this: configure a message once and it's sent automatically at the start of every new chat.
 
@@ -291,6 +312,7 @@ The template covers:
 - Custom color codes with examples
 - The `\RAW...\RAWEND` literal block
 - Nesting rules for `\R` and `\R!`
+- The `copy:NAME ... endcopy` convention for clipboard containers
 - The full preset list
 - A tastefulness reminder
 
@@ -309,6 +331,9 @@ The template covers:
 │   ├── colors.py              # custom escape parser + markdown render
 │   ├── storage.py             # chats, per-chat history
 │   ├── export.py              # markdown export
+│   ├── copy.py                # copy containers + clipboard
+│   ├── notify.py              # desktop notifications
+│   ├── terminal.py            # window title and terminal escapes
 │   ├── api.py                 # DeepSeek API calls, PoW, SSE
 │   ├── banner.py              # gradient banner
 │   ├── sessions.py            # prompt_toolkit sessions + ask helpers
@@ -322,6 +347,7 @@ The template covers:
 │   └── sha3_wasm_bg.7b9ca65ddd.wasm
 ├── pyproject.toml             # ruff config
 ├── requirements.txt
+├── LICENSE
 ├── .env                       # DEEPSEEK_TOKEN (gitignored)
 ├── config.json                # autosend, version, theme (gitignored)
 ├── themes.json                # theme definitions
@@ -350,8 +376,6 @@ The client parses these escapes in the model's replies and in anything you type:
 | `\R!` | Reset all colors |
 | `\RAW...\RAWEND` | Show codes literally |
 
-Each color escape runs from where it appears to the next escape or end of line. A reset is applied automatically at every newline.
-
 ### Nesting and reset
 
 The parser keeps a stack of active colors. `\R` pops one level and re-emits the parent color. `\R!` clears the whole stack.
@@ -364,7 +388,7 @@ Renders as cyan, then red, then cyan, then default.
 
 ### Raw blocks
 
-`\RAW...\RAWEND` emits text verbatim — no colors, no markdown, no parsing. Useful when the model wants to show a code without triggering it.
+`\RAW...\RAWEND` emits text verbatim — no colors, no markdown, no parsing.
 
 ```
 Write \RAW\C:{cyan}text\RAWEND to color text cyan.
@@ -377,6 +401,18 @@ Write \C:{cyan}text to color text cyan.
 ```
 
 Raw blocks don't span lines and don't nest. If `\RAWEND` is missing, the rest of the line is treated as raw.
+
+### Copy containers
+
+The model can mark a block as copyable:
+
+```
+copy:example
+echo "hello"
+endcopy
+```
+
+You'll see `[Block: example]` in the rendered reply. `/copy example` puts `echo "hello"` on your clipboard.
 
 ### Presets
 
@@ -466,7 +502,7 @@ Shipped themes: `default`, `dracula`, `nord`, `sunset`, `ocean`, `forest`, `mono
 | File | Purpose | Committed? |
 |---|---|---|
 | `.env` | `DEEPSEEK_TOKEN` | No |
-| `config.json` | Autosend, version, theme | No |
+| `config.json` | Autosend, version, theme, notifications, draft | No |
 | `chats.json` | Chat list, titles, parent IDs | No |
 | `history/*.json` | Per-chat message logs | No |
 | `themes.json` | Theme definitions | Yes |
@@ -481,7 +517,7 @@ Shipped themes: `default`, `dracula`, `nord`, `sunset`, `ocean`, `forest`, `mono
 Run this from the project root:
 
 ```bash
-python3 -c "import dskc.config, dskc.themes, dskc.colors, dskc.storage, dskc.api, dskc.sessions, dskc.settings, dskc.menu, dskc.chat, dskc.banner, dskc.export, dskc.reference; print('all ok')"
+python3 -c "import dskc.config, dskc.themes, dskc.colors, dskc.storage, dskc.api, dskc.sessions, dskc.settings, dskc.menu, dskc.chat, dskc.banner, dskc.export, dskc.reference, dskc.copy, dskc.notify, dskc.terminal; print('all ok')"
 ```
 
 If it fails, the traceback names the exact file and symbol. For static checks:
@@ -514,6 +550,22 @@ export COLORTERM=truecolor
 ```
 
 Add to `~/.bashrc` to make it permanent.
+
+### Clipboard doesn't work
+
+`:copy` uses OSC 52. Supported by Kitty, WezTerm, iTerm2, recent Konsole, recent GNOME Terminal, Windows Terminal. If your terminal doesn't support it, the content is printed to stdout instead — select it with the mouse.
+
+To force the stdout behavior:
+
+```bash
+python3 - <<'EOF'
+import json, pathlib
+p = pathlib.Path("config.json")
+cfg = json.loads(p.read_text())
+cfg["clipboard"] = "stdout"
+p.write_text(json.dumps(cfg, indent=2))
+EOF
+```
 
 ### PoW failure
 
@@ -555,10 +607,11 @@ The model is emitting codes the parser doesn't recognize. Run with `--debug` and
 
 - **Uses an undocumented internal API.** DeepSeek may change it without notice. If the client breaks, check the endpoints in `dskc/api.py`.
 - **Not a replacement for the official API.** For a stable, supported interface with an API key, use [api.deepseek.com](https://api.deepseek.com).
-- **No streaming display.** Replies are printed in full once the stream completes. Adding live streaming would require a state machine for markdown and custom escapes.
+- **No streaming display.** Replies are printed in full once the stream completes.
 - **No file uploads.** The client doesn't handle `ref_file_ids`.
 - **Raw blocks are line-scoped.** `\RAW...\RAWEND` doesn't cross newlines.
-- **`:retry` and `:edit` leave orphaned replies on the server.** Both versions stay in the chat tree; the web UI may show one, your terminal shows the one you received.
+- **Copy containers are per-reply.** They clear when a new reply arrives.
+- **`:retry` and `:edit` leave orphaned replies on the server.** Both versions stay in the chat tree.
 
 ---
 
@@ -575,6 +628,7 @@ The `dskc/` package is organized so each module has a single responsibility. Whe
 | New setting | `dskc/config.py` (getter/setter), `dskc/settings.py` (UI) |
 | New API endpoint | `dskc/api.py` |
 | New export format | `dskc/export.py`, `dskc/menu.py` (branch) |
+| New clipboard format | `dskc/copy.py` |
 
 Run ruff before committing:
 
@@ -586,7 +640,7 @@ ruff check dskc/
 
 ## License
 
-Whatever you want. Personal project, no warranty. Use at your own risk.
+MIT — see [LICENSE](LICENSE) for details.
 
 ---
 
