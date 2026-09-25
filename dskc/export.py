@@ -1,7 +1,8 @@
 import datetime
 import pathlib
-from lib_color import Color
-from lib_color import strip_ansi
+
+from lib_color import Color, strip_ansi
+
 from .colors import render_markdown
 from .debug import dbg
 from .paths import PROJECT_ROOT
@@ -39,7 +40,6 @@ def export_chat_markdown(chat_id: str):
 
 
 def chat_as_markdown(chat_id: str) -> str | None:
-    """Whole chat as raw markdown (no header metadata)."""
     data = load_history(chat_id)
     if data is None:
         return None
@@ -51,7 +51,6 @@ def chat_as_markdown(chat_id: str) -> str | None:
 
 
 def last_reply_text(chat_id: str, rendered: bool = False) -> str | None:
-    """Return the last assistant message's text, or None if none exists."""
     data = load_history(chat_id)
     if data is None:
         return None
@@ -64,12 +63,7 @@ def last_reply_text(chat_id: str, rendered: bool = False) -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------
-# :save command
-# ---------------------------------------------------------------------
-
 def _parse_save_args(args: str) -> tuple[set[str], str | None]:
-    """Split args into flags and an optional filename (may contain spaces)."""
     flags: set[str] = set()
     words: list[str] = []
     for token in args.split():
@@ -87,17 +81,12 @@ def _default_save_name(chat_id: str) -> str:
 
 
 def handle_save(args: str, chat_id: str) -> bool:
-    """
-    :save [--chat] [--rendered] [--no-ansi] [--append] [<file>]
-    Writes the last reply (or the whole chat) to a file.
-    """
     flags, name = _parse_save_args(args)
 
     if name is None:
         name = _default_save_name(chat_id)
     path = pathlib.Path(name).expanduser()
 
-    # Pick content source
     if "--chat" in flags:
         text = chat_as_markdown(chat_id)
         if text is None:

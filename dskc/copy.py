@@ -2,11 +2,10 @@ import base64
 import re
 import sys
 
-from lib_color import Color
-from . import config
-from lib_color import strip_ansi
-from .debug import dbg
+from lib_color import Color, strip_ansi
 
+from . import config
+from .debug import dbg
 
 _CONTAINER_RE = re.compile(
     r"^copy:([A-Za-z_][A-Za-z0-9_]*)[ \t]*\n(.*?)\nendcopy[ \t]*$",
@@ -79,26 +78,15 @@ def handle_copy(args: str, store: ContainerStore,
                 last_reply_raw: str | None,
                 last_reply_rendered: str | None,
                 chat_render_fn) -> bool:
-    """
-    :copy                      list available containers
-    :copy <name>               copy the named container (raw)
-    :copy --last               copy the last reply (raw markdown)
-    :copy --chat               copy the whole chat (raw markdown)
-    :copy --rendered           with ANSI codes (applies to --last / --chat)
-    :copy --plain              strip ANSI before copying
-    """
     flags, names = _parse_args(args)
 
-    # 1. Whole chat
     if "--chat" in flags:
         result = chat_render_fn()
         if result is None:
             print(Color.MessagePresets.Warning("  No history to copy."))
             return True
         payload = result
-        if "--rendered" not in flags:
-            payload = strip_ansi(payload)
-        if "--plain" in flags:
+        if "--plain" in flags or "--rendered" not in flags:
             payload = strip_ansi(payload)
         copy_to_clipboard(payload)
         print(Color.MessagePresets.Success(
@@ -106,7 +94,6 @@ def handle_copy(args: str, store: ContainerStore,
         ))
         return True
 
-    # 2. Last reply
     if "--last" in flags:
         if last_reply_raw is None:
             print(Color.MessagePresets.Warning("  No reply to copy yet."))
@@ -123,7 +110,6 @@ def handle_copy(args: str, store: ContainerStore,
         ))
         return True
 
-    # 3. Named container (unchanged behavior)
     if names:
         name = names[0]
         content = store.get(name)
@@ -138,10 +124,9 @@ def handle_copy(args: str, store: ContainerStore,
         ))
         return True
 
-    # 4. Default: list containers
     if not store.names():
         print(Color.MessagePresets.Warning(
-            "  No blocks available. Use --last, --chat, or ask the model to emit copy:NAME...endcopy."
+            "  No blocks. Use --last, --chat, or ask the model to emit copy:NAME...endcopy."
         ))
         return True
     print(Color.Format.dim("  Available blocks:"))

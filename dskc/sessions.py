@@ -3,6 +3,7 @@ from prompt_toolkit.enums import EditingMode
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
+
 from . import config
 from .themes import prompt_tag
 

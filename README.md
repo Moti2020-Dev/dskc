@@ -30,6 +30,7 @@ A terminal client for DeepSeek's web chat. Talks to the same backend the browser
 - **Rename** and **delete** from the menu
 - **Auto-titling** — the model prepends `\{Title}\`; the client strips and saves it
 - **Server title fallback** — fetches the title from the server if the model doesn't send one
+- **Window title** — terminal shows `DSKC — {chat title}` while in a chat
 
 ### Conversation control
 
@@ -37,7 +38,37 @@ A terminal client for DeepSeek's web chat. Talks to the same backend the browser
 - **`:edit`** — replace the last message with new text and resend
 - **`:undo`** — remove the last exchange from local history
 
-All three use the same trick: reuse the `parent_message_id` of the previous turn so the server treats the new message as a sibling of the old one.
+All three reuse the `parent_message_id` of the previous turn so the server treats the new message as a sibling of the old one.
+
+### Save and load
+
+`:save` writes to disk. `:load` reads from disk and sends as a message.
+
+| Command | Action |
+|---|---|
+| `:save <file>` | Write the last reply to `<file>` |
+| `:save --chat <file>` | Write the whole chat instead |
+| `:save --rendered <file>` | Include ANSI codes |
+| `:save --no-ansi <file>` | Strip ANSI codes |
+| `:save --append <file>` | Append instead of overwrite |
+| `:save` (no file) | Default name: `reply_{uuid[:8]}_{timestamp}.md` |
+| `:load <file>` | Read the file, strip ANSI, send as a message |
+| `:load --force <file>` | Skip the 200 KB size guard |
+
+`:load` refuses empty files, non-UTF-8 content, and files over 200 KB unless `--force` is passed.
+
+### Copy system
+
+| Command | Action |
+|---|---|
+| `:copy` | List available blocks in the last reply |
+| `:copy <name>` | Copy a named block via OSC 52 |
+| `:copy --last` | Copy the last reply |
+| `:copy --chat` | Copy the whole chat as markdown |
+| `:copy --plain` | Strip ANSI before copying |
+| `:copy --rendered` | Include ANSI codes |
+
+Copy Containers are blocks the model wraps in `copy:NAME ... endcopy`. The client extracts each and shows a dim `[Block: NAME]` marker. Clipboard uses OSC 52 — supported by Kitty, WezTerm, iTerm2, recent Konsole, recent GNOME Terminal, Windows Terminal. Falls back to printing if the terminal doesn't support it.
 
 ### Chat features
 
@@ -47,15 +78,6 @@ All three use the same trick: reuse the `parent_message_id` of the previous turn
 - **Autosend** — a message sent automatically at the start of every new chat
 - **Draft persistence** — unsent buffer survives a Ctrl+C or crash
 - **Desktop notifications** — `notify-send` (Linux) or `osascript` (macOS) when a reply arrives
-- **Window title** — terminal shows `DSKC — {chat title}` while in a chat
-
-### Copy system
-
-- **Copy Containers** — the model writes `copy:NAME ... endcopy` and the parser extracts each block
-- **`:copy <name>`** — puts a container's content on the system clipboard via OSC 52
-- **`:copy --rendered <name>`** — copies the ANSI-rendered version
-- **`:copy --chat`** — copies the entire chat as markdown
-- **`:copy`** with no args — lists available containers
 
 ### Reference commands
 
@@ -68,12 +90,6 @@ Type `:help` in a chat to see them all.
 | `:syntax` | Custom escape reference table |
 | `:keys` | All key bindings across menu, settings, chat |
 | `:aitemplate` | The autosend template, ready to copy |
-| `:export` | Export this chat to markdown |
-| `:retry` | Resend the last message |
-| `:edit` | Edit and resend the last message |
-| `:undo` | Remove the last exchange from local history |
-| `:copy <name>` | Copy a block from the last reply |
-| `:copy --chat` | Copy the whole chat as markdown |
 
 ### Rendering
 
@@ -102,6 +118,7 @@ Type `:help` in a chat to see them all.
 - **Semantic tags** — `banner`, `prompt`, `error`, `success`, `dim`, `chat_num`, `link`, etc.
 - **Built-in themes** — `default`, `dracula`, `nord`, `sunset`, `ocean`, `forest`, `mono`
 - **Live switching** — `s` → `t` picks a theme
+- **Theme name in prompt** — the chat prompt shows `Prompt: [theme]` in dim brackets
 - **Fallback chain** — missing theme → `default` → built-in → no color
 
 ### UI / UX
@@ -115,7 +132,7 @@ Type `:help` in a chat to see them all.
 - **Ctrl+R** — reverse search through prompt history
 - **Bracketed paste** — multi-line pastes don't submit early
 - **Ctrl+C / Ctrl+D** — `Ctrl+C` returns to the menu, `Ctrl+D` exits
-- **Keywords** — `stop`, `quit`, `exit`, `:export`, `:retry`, `:edit`, `:undo`, `:copy`
+- **Keywords** — `stop`, `quit`, `exit`, and the `:` commands
 
 ### Diagnostics
 
@@ -226,7 +243,7 @@ You'll see the menu:
  ▌     a command-line client                ▐
  ▙▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
 
-  V3.0  [default]
+  V3.1  [default]
   ──────────────────────────────────────────────
     1.  My First Chat  [88bab68d]
     2.  Debugging Session  [f51ae83f]
@@ -278,12 +295,19 @@ You'll see the menu:
 | `:keys` | Show all key bindings |
 | `:aitemplate` | Print the autosend template |
 | `:export` | Export this chat to markdown |
+| `:save <file>` | Write the last reply to a file |
+| `:save --chat <file>` | Write the whole chat |
+| `:save --append <file>` | Append instead of overwrite |
+| `:save --no-ansi <file>` | Strip ANSI escape codes |
+| `:load <file>` | Read a file and send it as a message |
 | `:retry` | Resend the last message |
 | `:edit` | Edit and resend the last message |
 | `:undo` | Remove the last exchange from local history |
-| `:copy <name>` | Copy a block from the last reply |
-| `:copy --rendered <name>` | Copy the ANSI-rendered version |
-| `:copy --chat` | Copy the whole chat as markdown |
+| `:copy` | List available blocks |
+| `:copy <name>` | Copy a named block |
+| `:copy --last` | Copy the last reply |
+| `:copy --chat` | Copy the whole chat |
+| `:copy --plain` | Strip ANSI before copying |
 
 ### Flags
 
@@ -330,7 +354,8 @@ The template covers:
 │   ├── themes.py              # tag, prompt_tag, theme helpers
 │   ├── colors.py              # custom escape parser + markdown render
 │   ├── storage.py             # chats, per-chat history
-│   ├── export.py              # markdown export
+│   ├── export.py              # markdown export + :save
+│   ├── load.py                # :load
 │   ├── copy.py                # copy containers + clipboard
 │   ├── notify.py              # desktop notifications
 │   ├── terminal.py            # window title and terminal escapes
@@ -341,7 +366,7 @@ The template covers:
 │   ├── reference.py           # command reference + autosend template
 │   ├── menu.py                # main menu
 │   └── chat.py                # chat loop
-├── lib_color.py               # ANSI color + markdown library
+├── lib_color.py               # ANSI color, markdown, strip_ansi
 ├── pow_solver.py              # WASM PoW wrapper
 ├── wasm/
 │   └── sha3_wasm_bg.7b9ca65ddd.wasm
@@ -502,7 +527,7 @@ Shipped themes: `default`, `dracula`, `nord`, `sunset`, `ocean`, `forest`, `mono
 | File | Purpose | Committed? |
 |---|---|---|
 | `.env` | `DEEPSEEK_TOKEN` | No |
-| `config.json` | Autosend, version, theme, notifications, draft | No |
+| `config.json` | Autosend, version, theme, notifications, drafts | No |
 | `chats.json` | Chat list, titles, parent IDs | No |
 | `history/*.json` | Per-chat message logs | No |
 | `themes.json` | Theme definitions | Yes |
@@ -517,7 +542,7 @@ Shipped themes: `default`, `dracula`, `nord`, `sunset`, `ocean`, `forest`, `mono
 Run this from the project root:
 
 ```bash
-python3 -c "import dskc.config, dskc.themes, dskc.colors, dskc.storage, dskc.api, dskc.sessions, dskc.settings, dskc.menu, dskc.chat, dskc.banner, dskc.export, dskc.reference, dskc.copy, dskc.notify, dskc.terminal; print('all ok')"
+python3 -c "import dskc.config, dskc.themes, dskc.colors, dskc.storage, dskc.api, dskc.sessions, dskc.settings, dskc.menu, dskc.chat, dskc.banner, dskc.export, dskc.reference, dskc.copy, dskc.notify, dskc.terminal, dskc.load; print('all ok')"
 ```
 
 If it fails, the traceback names the exact file and symbol. For static checks:

@@ -1,6 +1,7 @@
 """Terminal-level escape helpers: window title."""
 
 import sys
+
 from .debug import dbg
 
 

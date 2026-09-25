@@ -1,12 +1,17 @@
 from lib_color import Color
+
 from . import config, reference
 from .debug import dbg
 from .sessions import (
-    ask_settings, ask_input,
-    S_CANCEL, S_BACK, S_AUTOSEND, S_THEME, S_VERSION,
+    S_AUTOSEND,
+    S_BACK,
+    S_CANCEL,
+    S_THEME,
+    S_VERSION,
+    ask_input,
+    ask_settings,
 )
 from .themes import tag
-
 
 S_NOTIFY = "\x00NOTIFY"
 
@@ -26,10 +31,17 @@ def _show_settings_menu():
     print()
     print("  " + tag("banner", Color.Format.bold("◆  Settings")))
     print("  " + tag("dim", "─" * 46))
-    print("   " + tag("menu_action", "a") + tag("dim", "  autosend: ") + autosend_line)
-    print("   " + tag("menu_action", "t") + tag("dim", "  theme: ") + tag("version", config.get_theme_name()))
-    print("   " + tag("menu_action", "v") + tag("dim", "  version: ") + tag("version", config.get_version()))
-    print("   " + tag("menu_action", "n") + tag("dim", "  notifications: ") + notify_state)
+    theme_name = config.get_theme_name()
+    version = config.get_version()
+    print("   " + tag("menu_action", "a")
+          + tag("dim", "  autosend: ") + autosend_line)
+    print("   " + tag("menu_action", "t")
+          + tag("dim", "  theme: ") + tag("version", theme_name))
+    print("   " + tag("menu_action", "v")
+          + tag("dim", "  version: ") + tag("version", version))
+    print("   " + tag("menu_action", "n")
+          + tag("dim", "  notifications: ") + notify_state)
+    print("   " + tag("menu_key", "b") + tag("dim", "  back"))
     print("   " + tag("menu_key", "b") + tag("dim", "  back"))
     print()
 

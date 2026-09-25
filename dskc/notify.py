@@ -4,8 +4,8 @@ import shutil
 import subprocess
 import sys
 
-from .debug import dbg
 from . import config
+from .debug import dbg
 
 
 def _linux_notify(title: str, body: str) -> bool:

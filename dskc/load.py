@@ -1,8 +1,8 @@
 import pathlib
-from lib_color import Color
-from lib_color import strip_ansi
-from .debug import dbg
 
+from lib_color import Color, strip_ansi
+
+from .debug import dbg
 
 MAX_BYTES = 200_000
 
@@ -20,10 +20,6 @@ def _parse_load_args(args: str) -> tuple[set[str], str | None]:
 
 
 def read_load_file(args: str) -> str | None:
-    """
-    Read a file for :load. Returns the cleaned text, or None on error
-    (in which case an error message has already been printed).
-    """
     flags, name = _parse_load_args(args)
 
     if name is None:

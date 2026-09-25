@@ -1,6 +1,7 @@
 AUTOSEND_TEMPLATE = r"""You are replying to a terminal client that renders ANSI colors and markdown.
 
-Markdown: # headers, **bold**, *italic*, ~~strikethrough~~, `code`, ``` fenced blocks ```, - lists, > quotes, [links](url).
+Markdown: # headers, **bold**, *italic*, ~~strikethrough~~, `code`,
+``` fenced blocks ```, - lists, > quotes, [links](url).
 
 Color codes:
   \C:{preset}text     foreground preset
@@ -116,7 +117,7 @@ CHAT_COMMANDS = [
     (":save --no-ansi <f>","Strip ANSI before writing"),
     (":load <file>",       "Read file and send as a message"),
     (":retry",             "Resend the last message"),
-    (":edit",              "Edit the last message"),
+    (":edit",              "Edit and resend the last message"),
     (":undo",              "Remove the last exchange from local history"),
     (":copy",              "List available copy blocks"),
     (":copy --last",       "Copy the last reply to clipboard"),

@@ -1,21 +1,26 @@
 import asyncio
 import re
+
 from lib_color import Color
+
 from . import config, reference
-from .api import send_message, fetch_chat_title
+from .api import fetch_chat_title, send_message
 from .colors import render_markdown
 from .copy import ContainerStore, handle_copy
 from .debug import dbg
 from .export import export_chat_markdown, handle_save
 from .load import read_load_file
 from .notify import notify
-from .sessions import ask_multiline, ask_input, S_CANCEL
+from .sessions import S_CANCEL, ask_input, ask_multiline
 from .storage import (
-    update_chat, append_history, truncate_history_tail, load_chats, load_history,
+    append_history,
+    load_chats,
+    load_history,
+    truncate_history_tail,
+    update_chat,
 )
-from .terminal import set_title, reset_title
+from .terminal import reset_title, set_title
 from .themes import tag
-
 
 _TITLE_RE = re.compile(r"^\\\{([^}]*)\}\\\s*\n?", re.MULTILINE)
 
@@ -32,7 +37,6 @@ def _extract_title(text: str):
 
 
 def _chat_render_fn(chat_id: str):
-    """Return (raw_markdown, rendered) for :copy --chat."""
     data = load_history(chat_id)
     if data is None:
         return None
@@ -110,6 +114,7 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
         try:
             edited = (await ask_input("Draft: ")).strip()
         except EOFError:
+            reset_title()
             raise SystemExit(0)
         except KeyboardInterrupt:
             print()
@@ -172,10 +177,10 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
             reset_title()
             return
 
+        # Colon commands. Keep original case for file paths.
         if low.startswith(":"):
-            cmd, _, args = low[1:].partition(" ")
-            # Preserve original case for file paths
-            _, _, args_orig = stripped[1:].partition(" ")
+            cmd, _, _ = stripped[1:].partition(" ")
+            args_orig = stripped[1 + len(cmd):].lstrip()
 
             if cmd == "export":
                 path = export_chat_markdown(chat_id)
@@ -193,11 +198,24 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                 text = read_load_file(args_orig)
                 if text is None:
                     continue
+                # Send the loaded text as a normal message
                 stripped = text
-                low = stripped.lower()
-                # fall through to normal send
+                last_user_message = stripped
+                last_parent_id = parent_message_id
+                new_parent, _, last_reply = await _send_and_render(
+                    session, token, chat_id, parent_message_id, stripped, store
+                )
+                parent_message_id = new_parent
+                notify("DSKC", "Reply received")
+                if first_turn:
+                    fetched = await fetch_chat_title(session, token, chat_id)
+                    title = fetched or (stripped[:40] + ("..." if len(stripped) > 40 else ""))
+                    update_chat(chat_id, title=title)
+                    set_title(f"DSKC — {title}")
+                    first_turn = False
+                continue
 
-            elif cmd == "copy":
+            if cmd == "copy":
                 rendered = render_markdown(last_reply) if last_reply else None
                 handle_copy(
                     args_orig, store,
@@ -207,7 +225,7 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                 )
                 continue
 
-            elif cmd == "retry":
+            if cmd == "retry":
                 if last_user_message is None:
                     print(Color.MessagePresets.Warning("  Nothing to retry yet."))
                     continue
@@ -219,7 +237,7 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                 notify("DSKC", "Reply received")
                 continue
 
-            elif cmd == "edit":
+            if cmd == "edit":
                 if last_user_message is None:
                     print(Color.MessagePresets.Warning("  Nothing to edit yet."))
                     continue
@@ -244,19 +262,17 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                 notify("DSKC", "Reply received")
                 continue
 
-            elif cmd == "undo":
+            if cmd == "undo":
                 truncate_history_tail(chat_id, 2)
                 print(Color.MessagePresets.Success("  Last exchange removed from local history."))
                 continue
 
-            elif reference.dispatch(cmd, args):
+            if reference.dispatch(cmd, args_orig):
                 continue
 
-            else:
-                print(Color.MessagePresets.Error(f"  Unknown command: :{cmd}"))
-                continue
+            print(Color.MessagePresets.Error(f"  Unknown command: :{cmd}"))
+            continue
 
-        # If we fell through from :load, stripped now holds the file contents
         dbg("user message", (len(stripped), stripped[:60]))
         last_user_message = stripped
         last_parent_id = parent_message_id

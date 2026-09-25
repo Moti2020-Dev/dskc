@@ -1,26 +1,19 @@
 import re
-from lib_color import Color, Markdown, RESET
-from .debug import dbg
-from .copy import ContainerStore, extract_containers
 
+from lib_color import RESET, Color, Markdown
+
+from .copy import ContainerStore, extract_containers
+from .debug import dbg
 
 _RAW_OPEN = "\\RAW"
 _RAW_CLOSE = "\\RAWEND"
 _PLACEHOLDER_RE = re.compile(r"\x00RAW(\d+)\x00")
-_ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
-
-
-def strip_ansi(text: str) -> str:
-    """Remove ANSI SGR sequences from text."""
-    return _ANSI_RE.sub("", text)
 
 
 def render_markdown(text: str, store: ContainerStore | None = None) -> str:
-    # 0. Extract copy containers first, if a store was provided.
     if store is not None:
         text = extract_containers(text, store)
 
-    # 1. Extract \RAW...\RAWEND blocks into placeholders
     raw_blocks: list[str] = []
 
     def _stash(m):
@@ -43,15 +36,12 @@ def render_markdown(text: str, store: ContainerStore | None = None) -> str:
                 new_lines.append(line)
         text = "\n".join(new_lines)
 
-    # 2. Normal pipeline
     processed = Markdown.render(_apply_custom(text))
 
-    # 3. Restore raw blocks verbatim
     def _restore(m):
         return raw_blocks[int(m.group(1))]
 
-    processed = _PLACEHOLDER_RE.sub(_restore, processed)
-    return processed
+    return _PLACEHOLDER_RE.sub(_restore, processed)
 
 
 def _apply_custom(text: str) -> str:

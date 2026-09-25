@@ -1,9 +1,11 @@
 import json
 import os
+
 from dotenv import load_dotenv
+
 from . import DEFAULT_VERSION
-from .paths import CONFIG_FILE, THEMES_FILE
 from .debug import dbg
+from .paths import CONFIG_FILE, THEMES_FILE
 
 load_dotenv()
 
@@ -21,8 +23,12 @@ def load_config() -> dict:
         return _CONFIG_CACHE
     if CONFIG_FILE.exists():
         try:
-            _CONFIG_CACHE = json.loads(CONFIG_FILE.read_text())
-            dbg("config loaded", list(_CONFIG_CACHE.keys()), once=True)
+            cfg = json.loads(CONFIG_FILE.read_text())
+            # Migrate legacy global "draft" key
+            if "draft" in cfg:
+                cfg.pop("draft", None)
+                dbg("dropped legacy global draft")
+            _CONFIG_CACHE = cfg
             return _CONFIG_CACHE
         except (json.JSONDecodeError, OSError) as e:
             dbg("config load failed", str(e))
@@ -31,7 +37,7 @@ def load_config() -> dict:
         "version": DEFAULT_VERSION,
         "theme": "default",
         "notifications": True,
-        "draft": "",
+        "drafts": {},
         "clipboard": "auto",
     }
     return _CONFIG_CACHE
@@ -84,18 +90,36 @@ def set_notifications(on: bool):
     save_config(cfg)
 
 
-def get_draft() -> str:
-    return load_config().get("draft", "")
+def get_draft(chat_id: str) -> str:
+    return load_config().get("drafts", {}).get(chat_id, "")
 
 
-def set_draft(text: str):
+def set_draft(chat_id: str, text: str):
     cfg = load_config()
-    cfg["draft"] = text
+    drafts = cfg.setdefault("drafts", {})
+    if text.strip():
+        drafts[chat_id] = text
+    else:
+        drafts.pop(chat_id, None)
     save_config(cfg)
 
 
-def clear_draft():
-    set_draft("")
+def clear_draft(chat_id: str):
+    set_draft(chat_id, "")
+
+
+def prune_drafts(valid_chat_ids: set[str]):
+    """Remove drafts for chats that no longer exist."""
+    cfg = load_config()
+    drafts = cfg.get("drafts", {})
+    removed = [cid for cid in drafts if cid not in valid_chat_ids]
+    if not removed:
+        return
+    for cid in removed:
+        drafts.pop(cid, None)
+    cfg["drafts"] = drafts
+    save_config(cfg)
+    dbg("drafts pruned", len(removed))
 
 
 def get_clipboard() -> str:
