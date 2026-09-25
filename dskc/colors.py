@@ -1,17 +1,20 @@
 import re
-
-from lib_color import RESET, Color, Markdown
-
+from lib_color import Color, Markdown, RESET
 from .debug import dbg
+from .copy import ContainerStore, extract_containers
+
 
 _RAW_OPEN = "\\RAW"
 _RAW_CLOSE = "\\RAWEND"
 _PLACEHOLDER_RE = re.compile(r"\x00RAW(\d+)\x00")
 
 
-def render_markdown(text: str) -> str:
-    # 1. Extract \RAW...\RAWEND blocks into placeholders so nothing else
-    #    touches their contents.
+def render_markdown(text: str, store: ContainerStore | None = None) -> str:
+    # 0. Extract copy containers first, if a store was provided.
+    if store is not None:
+        text = extract_containers(text, store)
+
+    # 1. Extract \RAW...\RAWEND blocks into placeholders
     raw_blocks: list[str] = []
 
     def _stash(m):
@@ -19,12 +22,9 @@ def render_markdown(text: str) -> str:
         dbg("raw block stashed", len(m.group(1)))
         return f"\x00RAW{len(raw_blocks) - 1}\x00"
 
-    # Closed blocks on a single line
     text = re.sub(r"\\RAW(.*?)\\RAWEND", _stash, text)
 
-    # Unclosed \RAW: treat the rest of that line as raw
     if _RAW_OPEN in text:
-        # Process line by line so unclosed blocks only eat their own line
         new_lines = []
         for line in text.split("\n"):
             if _RAW_OPEN in line and not _PLACEHOLDER_RE.search(line):

@@ -1,11 +1,9 @@
 import json
 import os
-
 from dotenv import load_dotenv
-
 from . import DEFAULT_VERSION
-from .debug import dbg
 from .paths import CONFIG_FILE, THEMES_FILE
+from .debug import dbg
 
 load_dotenv()
 
@@ -13,17 +11,9 @@ _CONFIG_CACHE = None
 _THEMES_CACHE = None
 
 
-# ---------------------------------------------------------------------
-# Token
-# ---------------------------------------------------------------------
-
 def get_token() -> str | None:
     return os.getenv("DEEPSEEK_TOKEN")
 
-
-# ---------------------------------------------------------------------
-# Config file (config.json)
-# ---------------------------------------------------------------------
 
 def load_config() -> dict:
     global _CONFIG_CACHE
@@ -40,6 +30,9 @@ def load_config() -> dict:
         "autosend": "",
         "version": DEFAULT_VERSION,
         "theme": "default",
+        "notifications": True,
+        "draft": "",
+        "clipboard": "auto",
     }
     return _CONFIG_CACHE
 
@@ -50,10 +43,6 @@ def save_config(cfg: dict):
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
     dbg("config saved", list(cfg.keys()))
 
-
-# ---------------------------------------------------------------------
-# Individual settings
-# ---------------------------------------------------------------------
 
 def get_autosend() -> str:
     return load_config().get("autosend", "")
@@ -85,9 +74,40 @@ def set_theme_name(name: str):
     save_config(cfg)
 
 
-# ---------------------------------------------------------------------
-# Themes file (themes.json)
-# ---------------------------------------------------------------------
+def get_notifications() -> bool:
+    return bool(load_config().get("notifications", True))
+
+
+def set_notifications(on: bool):
+    cfg = load_config()
+    cfg["notifications"] = bool(on)
+    save_config(cfg)
+
+
+def get_draft() -> str:
+    return load_config().get("draft", "")
+
+
+def set_draft(text: str):
+    cfg = load_config()
+    cfg["draft"] = text
+    save_config(cfg)
+
+
+def clear_draft():
+    set_draft("")
+
+
+def get_clipboard() -> str:
+    """auto | osc52 | stdout"""
+    return load_config().get("clipboard", "auto")
+
+
+def set_clipboard(mode: str):
+    cfg = load_config()
+    cfg["clipboard"] = mode
+    save_config(cfg)
+
 
 def load_themes() -> dict:
     global _THEMES_CACHE
@@ -108,7 +128,6 @@ def load_themes() -> dict:
 
 
 def reload_themes():
-    """Force a re-read of themes.json on the next load_themes() call."""
     global _THEMES_CACHE
     _THEMES_CACHE = None
     dbg("themes cache invalidated")

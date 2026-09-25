@@ -1,8 +1,3 @@
-"""
-Reference content for chat-prompt commands.
-Single source of truth for the autosend template and the syntax tables.
-"""
-
 AUTOSEND_TEMPLATE = r"""You are replying to a terminal client that renders ANSI colors and markdown.
 
 Markdown: # headers, **bold**, *italic*, ~~strikethrough~~, `code`, ``` fenced blocks ```, - lists, > quotes, [links](url).
@@ -28,6 +23,16 @@ To show a code literally without triggering it, wrap it in \RAW...\RAWEND:
   \C:{cyan}text actually colors the text.
 Raw blocks don't span lines, and don't nest.
 
+Copy blocks — for content the user will want to copy:
+
+  copy:BlockName
+  ...content...
+  endcopy
+
+The user can then type /copy BlockName to put the content on their clipboard.
+Use descriptive names. Only use it for things worth copying — commands, config,
+code, URLs. Do not wrap every code block.
+
 Presets: black, red, green, yellow, blue, magenta, cyan, white, gray,
 plus ansi_* and ansi_bright_* variants.
 
@@ -35,6 +40,22 @@ Use color tastefully — headings, warnings, emphasis, status. Not every word.
 
 Confirm and wait for my next message."""
 
+
+CHAT_COMMANDS = [
+    (":help",        "Show this list"),
+    (":colors",      "Show every preset rendered in itself"),
+    (":syntax",      "Show the custom escape reference"),
+    (":keys",        "Show all key bindings"),
+    (":aitemplate",  "Print the autosend template"),
+    (":export",      "Export this chat to markdown"),
+    (":retry",       "Resend the last message"),
+    (":edit",        "Edit the last message"),
+    (":undo",        "Remove the last exchange from local history"),
+    (":copy <name>", "Copy a block from the last reply"),
+    (":copy --chat", "Copy the whole chat as markdown"),
+    ("stop",         "Quit the program"),
+    ("quit / exit",  "Back to the menu"),
+]
 
 PRESETS_ORDERED = [
     "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white", "gray",
@@ -78,6 +99,7 @@ SYNTAX_ROWS = [
     (r"\R",                "Close innermost color"),
     (r"\R!",               "Reset all colors"),
     (r"\RAW...\RAWEND",    "Show codes literally"),
+    (r"copy:NAME...endcopy", "Mark a block as copyable"),
 ]
 
 

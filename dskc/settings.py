@@ -1,17 +1,14 @@
 from lib_color import Color
-
 from . import config, reference
 from .debug import dbg
 from .sessions import (
-    S_AUTOSEND,
-    S_BACK,
-    S_CANCEL,
-    S_THEME,
-    S_VERSION,
-    ask_input,
-    ask_settings,
+    ask_settings, ask_input,
+    S_CANCEL, S_BACK, S_AUTOSEND, S_THEME, S_VERSION,
 )
 from .themes import tag
+
+
+S_NOTIFY = "\x00NOTIFY"
 
 
 def _show_settings_menu():
@@ -24,12 +21,15 @@ def _show_settings_menu():
     else:
         autosend_line = tag("dim", "(none)")
 
+    notify_state = tag("success", "on") if config.get_notifications() else tag("dim", "off")
+
     print()
     print("  " + tag("banner", Color.Format.bold("◆  Settings")))
     print("  " + tag("dim", "─" * 46))
     print("   " + tag("menu_action", "a") + tag("dim", "  autosend: ") + autosend_line)
     print("   " + tag("menu_action", "t") + tag("dim", "  theme: ") + tag("version", config.get_theme_name()))
     print("   " + tag("menu_action", "v") + tag("dim", "  version: ") + tag("version", config.get_version()))
+    print("   " + tag("menu_action", "n") + tag("dim", "  notifications: ") + notify_state)
     print("   " + tag("menu_key", "b") + tag("dim", "  back"))
     print()
 
@@ -83,6 +83,14 @@ async def settings_menu() -> None:
 
         if raw == S_AUTOSEND:
             await _edit_autosend()
+            continue
+
+        if raw == S_NOTIFY:
+            new_state = not config.get_notifications()
+            config.set_notifications(new_state)
+            print(Color.MessagePresets.Success(
+                f"  Notifications {'enabled' if new_state else 'disabled'}."
+            ))
             continue
 
         if raw == S_THEME:

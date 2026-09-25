@@ -1,8 +1,9 @@
 from prompt_toolkit import PromptSession
 from prompt_toolkit.enums import EditingMode
 from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
-
+from . import config
 from .themes import prompt_tag
 
 S_QUIT     = "\x00QUIT"
@@ -15,8 +16,8 @@ S_THEME    = "\x00THEME"
 S_VERSION  = "\x00VERSION"
 S_AUTOSEND = "\x00AUTOSEND"
 S_BACK     = "\x00BACK"
+S_NOTIFY   = "\x00NOTIFY"
 
-# Main menu single-key actions
 _MENU_ACTIONS = [
     ("r", S_RENAME),
     ("d", S_DELETE),
@@ -25,11 +26,11 @@ _MENU_ACTIONS = [
     ("q", S_QUIT),
 ]
 
-# Settings submenu single-key actions
 _SETTINGS_ACTIONS = [
     ("a", S_AUTOSEND),
     ("t", S_THEME),
     ("v", S_VERSION),
+    ("n", S_NOTIFY),
     ("b", S_BACK),
 ]
 
@@ -58,6 +59,10 @@ def _common_bindings(kb):
 
     @kb.add("escape", eager=True)
     def _(event):
+        # Save the draft before exiting on Esc
+        text = event.current_buffer.text
+        if text.strip():
+            config.set_draft(text)
         event.app.exit(result=S_CANCEL)
 
 
@@ -72,6 +77,8 @@ def build_session(actions=None) -> PromptSession:
         multiline=True,
         prompt_continuation=_continuation,
         editing_mode=EditingMode.EMACS,
+        enable_history_search=True,
+        history=InMemoryHistory(),
     )
 
 
@@ -117,6 +124,15 @@ def _label_to_formatted(label) -> FormattedText:
     return FormattedText([("", str(label))])
 
 
+def _chat_prompt_label() -> FormattedText:
+    """Build a prompt label that shows the active theme in dim brackets."""
+    theme_name = config.get_theme_name()
+    return FormattedText([
+        ("#64c8ff", "Prompt: "),
+        ("#787878", f"[{theme_name}] "),
+    ])
+
+
 async def ask_menu(label=None) -> str:
     if label is None:
         label = prompt_tag("prompt", "> ")
@@ -136,11 +152,13 @@ async def ask_input(label=None) -> str:
 
 
 async def ask_multiline(label=None) -> str:
-    if label is None:
-        label = prompt_tag("prompt", "Prompt: ")
     session = _get_chat()
+    if label is None:
+        label = _chat_prompt_label()
+    else:
+        label = _label_to_formatted(label)
     while True:
-        text = await session.prompt_async(_label_to_formatted(label))
+        text = await session.prompt_async(label)
         if text == S_CANCEL:
             raise KeyboardInterrupt
         if text.strip():
