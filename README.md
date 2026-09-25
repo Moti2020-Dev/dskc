@@ -1,4 +1,4 @@
-# DSKC — DeepSeek Client
+# DSKC — DeepSeek Client — V2.0
 
 A terminal client for DeepSeek's web chat. Talks to the same backend the browser uses, so it's free, requires no API key, and supports the same models and features. Renders markdown and true 24-bit color, persists chats locally, and lets you resume any conversation across restarts.
 
