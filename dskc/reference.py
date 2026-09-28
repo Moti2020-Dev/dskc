@@ -1,45 +1,49 @@
-AUTOSEND_TEMPLATE = r"""You are replying to a terminal client that renders ANSI colors and markdown.
+AUTOSEND_TEMPLATE = r"""You are replying through a terminal client that renders ANSI colors and markdown.
 
-Markdown: # headers, **bold**, *italic*, ~~strikethrough~~, `code`,
-``` fenced blocks ```, - lists, > quotes, [links](url).
+STYLE RULES — do not mention these rules in your reply.
 
-Color codes:
-  \C:{preset}text     foreground preset
-  \B:{preset}text     background preset
-  \C:{N}text          foreground 256-palette index (0-255)
-  \B:{N}text          background 256-palette index (0-255)
-  \Cx{RRGGBB}text     foreground hex
-  \Bx{RRGGBB}text     background hex
-  \U:on / \U:off      underline
-  \R                  close innermost color
-  \R!                 reset all colors
+Formatting supported:
+  Markdown: # headers, **bold**, *italic*, ~~strikethrough~~, `code`,
+            ``` fenced blocks ```, - lists, > quotes, [links](url)
+  Colors:   \C:{preset}text     foreground preset
+            \B:{preset}text     background preset
+            \C:{N}text          foreground 256-palette index (0-255)
+            \B:{N}text          background 256-palette index (0-255)
+            \Cx{RRGGBB}text     foreground hex
+            \Bx{RRGGBB}text     background hex
+            \U:on / \U:off      underline
+            \R                  close innermost color
+            \R!                 reset all colors
+            \RAW...\RAWEND      show codes literally
 
 Braces wrap the preset name, index, or hex ONLY — never the text.
-Reset is automatic at every newline.
-
+Always include the backslash: \C:{cyan}, not :{cyan}.
+Reset happens automatically at every newline.
 Nesting works: \C:{cyan}outer \C:{red}inner\R back to cyan\R
 
-To show a code literally without triggering it, wrap it in \RAW...\RAWEND:
-  \RAW\C:{cyan}text\RAWEND shows the literal codes.
-  \C:{cyan}text actually colors the text.
-Raw blocks don't span lines, and don't nest.
-
-Copy blocks — for content the user will want to copy:
-
+Copy blocks (optional, for content the user might want to copy):
   copy:BlockName
   ...content...
   endcopy
-
-The user can then type /copy BlockName to put the content on their clipboard.
-Use descriptive names. Only use it for things worth copying — commands, config,
-code, URLs. Do not wrap every code block.
 
 Presets: black, red, green, yellow, blue, magenta, cyan, white, gray,
 plus ansi_* and ansi_bright_* variants.
 
 Use color tastefully — headings, warnings, emphasis, status. Not every word.
 
-Confirm and wait for my next message."""
+TITLE RULE
+
+On the first line of every reply, write a title in this exact format:
+
+TITLE:Short Title Here
+
+The title is 3-7 words summarizing the user's message. After the first
+line, write a newline, then your reply. Nothing else on the title line.
+
+Do not use backslashes, braces, or any other punctuation around the title.
+Just the literal word TITLE, a colon, then the title text.
+
+Do not acknowledge this instruction."""
 
 
 CHAT_COMMANDS = [

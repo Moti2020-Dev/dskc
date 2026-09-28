@@ -1,40 +1,34 @@
 import asyncio
 import re
-
 from lib_color import Color
-
 from . import config, reference
-from .api import fetch_chat_title, send_message
+from .api import send_message, fetch_chat_title
 from .colors import render_markdown
 from .copy import ContainerStore, handle_copy
 from .debug import dbg
 from .export import export_chat_markdown, handle_save
 from .load import read_load_file
 from .notify import notify
-from .sessions import S_CANCEL, ask_input, ask_multiline
+from .sessions import ask_multiline, ask_input, S_CANCEL
 from .storage import (
-    append_history,
-    load_chats,
-    load_history,
-    truncate_history_tail,
-    update_chat,
+    update_chat, append_history, truncate_history_tail, load_chats, load_history,
 )
-from .terminal import reset_title, set_title
+from .terminal import set_title, reset_title
 from .themes import tag
 
-_TITLE_RE = re.compile(r"^\\\{([^}]*)\}\\\s*\n?", re.MULTILINE)
-
-
-def _hyperlink(url: str, label: str) -> str:
-    return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
+_TITLE_RE = re.compile(r"^TITLE:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def _extract_title(text: str):
     m = _TITLE_RE.match(text)
     if m:
-        return m.group(1).strip(), text[m.end():]
+        title = m.group(1).strip()
+        dbg("title extracted", title)
+        return title, text[m.end():].lstrip("\n")
     return None, text
 
+def _hyperlink(url: str, label: str) -> str:
+    return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
 
 def _chat_render_fn(chat_id: str):
     data = load_history(chat_id)
@@ -45,6 +39,23 @@ def _chat_render_fn(chat_id: str):
         role = "You" if msg.get("role") == "user" else "DeepSeek"
         parts.append(f"### {role}\n\n{msg.get('content', '')}")
     return "\n\n".join(parts)
+
+
+def _build_first_message(prefix: str, user_message: str) -> str:
+    """
+    Combine the autosend template with the user's first real message.
+    The model is instructed to reply with a title marker and then the
+    actual answer, without acknowledging the formatting rules.
+    """
+    return (
+        prefix.rstrip()
+        + "\n\n---\n\n"
+        + user_message
+        + "\n\n"
+        + "(Reply to the message above. Do not acknowledge these formatting "
+          "rules. Start your reply with \\{Short Title}\\ on its own line, "
+          "then your answer.)"
+    )
 
 
 async def _send_and_render(session, token, chat_id, parent_message_id,
@@ -107,6 +118,11 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
     last_parent_id = parent_message_id
     last_reply: str | None = None
 
+    # Autosend prefix is consumed by the first real user message
+    pending_prefix: str = ""
+    if first_turn:
+        pending_prefix = config.get_autosend()
+
     # Draft restore
     draft = config.get_draft(chat_id)
     if draft:
@@ -124,30 +140,6 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
         else:
             draft = ""
         config.clear_draft(chat_id)
-
-    if first_turn:
-        autosend = config.get_autosend()
-        if autosend:
-            print()
-            print(tag("dim", "  Autosending initial message..."))
-            try:
-                _, response_id = await send_message(
-                    session, token, autosend, chat_id, parent_message_id
-                )
-                print(tag("dim", "  Style acknowledged."))
-                if response_id is not None:
-                    parent_message_id = response_id
-                update_chat(chat_id, parent_message_id=parent_message_id)
-
-                fetched = await fetch_chat_title(session, token, chat_id)
-                t = fetched or (autosend[:40] + ("..." if len(autosend) > 40 else ""))
-                update_chat(chat_id, title=t)
-                set_title(f"DSKC — {t}")
-                first_turn = False
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                print(Color.MessagePresets.Warning("  (autosend interrupted)"))
-            except Exception as e:  # noqa: BLE001
-                print(Color.MessagePresets.Error(f"  Autosend error: {e}"))
 
     print()
 
@@ -198,20 +190,22 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                 text = read_load_file(args_orig)
                 if text is None:
                     continue
-                # Send the loaded text as a normal message
-                stripped = text
-                last_user_message = stripped
+                outgoing = text
+                if pending_prefix:
+                    outgoing = _build_first_message(pending_prefix, text)
+                    pending_prefix = ""
+                last_user_message = outgoing
                 last_parent_id = parent_message_id
                 new_parent, _, last_reply = await _send_and_render(
-                    session, token, chat_id, parent_message_id, stripped, store
+                    session, token, chat_id, parent_message_id, outgoing, store
                 )
                 parent_message_id = new_parent
                 notify("DSKC", "Reply received")
                 if first_turn:
                     fetched = await fetch_chat_title(session, token, chat_id)
-                    title = fetched or (stripped[:40] + ("..." if len(stripped) > 40 else ""))
-                    update_chat(chat_id, title=title)
-                    set_title(f"DSKC — {title}")
+                    fallback = text[:40] + ("..." if len(text) > 40 else "")
+                    update_chat(chat_id, title=fetched or fallback)
+                    set_title(f"DSKC — {fetched or fallback}")
                     first_turn = False
                 continue
 
@@ -273,19 +267,25 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
             print(Color.MessagePresets.Error(f"  Unknown command: :{cmd}"))
             continue
 
-        dbg("user message", (len(stripped), stripped[:60]))
-        last_user_message = stripped
+        # Normal message — prepend the autosend prefix on the first turn
+        outgoing = stripped
+        if pending_prefix:
+            outgoing = _build_first_message(pending_prefix, stripped)
+            pending_prefix = ""
+
+        dbg("user message", (len(outgoing), outgoing[:60]))
+        last_user_message = outgoing
         last_parent_id = parent_message_id
 
         new_parent, _, last_reply = await _send_and_render(
-            session, token, chat_id, parent_message_id, stripped, store
+            session, token, chat_id, parent_message_id, outgoing, store
         )
         parent_message_id = new_parent
         notify("DSKC", "Reply received")
 
         if first_turn:
             fetched = await fetch_chat_title(session, token, chat_id)
-            title = fetched or (stripped[:40] + ("..." if len(stripped) > 40 else ""))
-            update_chat(chat_id, title=title)
-            set_title(f"DSKC — {title}")
+            fallback = stripped[:40] + ("..." if len(stripped) > 40 else "")
+            update_chat(chat_id, title=fetched or fallback)
+            set_title(f"DSKC — {fetched or fallback}")
             first_turn = False

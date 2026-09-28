@@ -77,3 +77,6 @@ backup_*/
 
 # --- IDK ---
 pyproject.toml
+
+# --- Random debugger tool ---
+run.sh
