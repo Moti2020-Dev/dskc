@@ -1,10 +1,10 @@
+# lib_color.py
 """
-Terminal color library with true 24-bit RGB + a markdown renderer.
+Terminal color library with true 24-bit RGB support + markdown renderer.
 
-No external dependencies.
+No external dependencies. Uses Python's built-in round().
 """
 
-import os
 import re
 
 
@@ -13,6 +13,7 @@ import re
 # ---------------------------------------------------------------------
 
 def _detect_mode() -> str:
+    import os
     ct = os.environ.get("COLORTERM", "").lower()
     term = os.environ.get("TERM", "").lower()
     if ct in ("truecolor", "24bit"):
@@ -58,7 +59,6 @@ def _bg256(r: int, g: int, b: int) -> str:
 
 
 def fg(r: int, g: int = None, b: int = None) -> str:
-    """Foreground SGR. Accepts (r, g, b) or (0xRRGGBB)."""
     if g is None and b is None:
         value = int(r) & 0xFFFFFF
         r, g, b = (value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF
@@ -66,11 +66,10 @@ def fg(r: int, g: int = None, b: int = None) -> str:
         return _fg24(r, g, b)
     if _MODE == "256":
         return _fg256(r, g, b)
-    return ""  # no color support
+    return ""
 
 
 def bg(r: int, g: int = None, b: int = None) -> str:
-    """Background SGR. Accepts (r, g, b) or (0xRRGGBB)."""
     if g is None and b is None:
         value = int(r) & 0xFFFFFF
         r, g, b = (value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF
@@ -97,7 +96,7 @@ BG_RESET = "\033[49m"
 
 
 # ---------------------------------------------------------------------
-# Public API (keeps the old shape: Color.Basic.fg, Color.Format.bold, ...)
+# Public API
 # ---------------------------------------------------------------------
 
 class Color:
@@ -302,15 +301,6 @@ class Color:
 # ---------------------------------------------------------------------
 # Markdown renderer
 # ---------------------------------------------------------------------
-#
-# Order of operations (each step is a plain string replace, no regex
-# lookbehinds, no placeholders that can leak):
-#
-#   1. Split into lines.
-#   2. Track fenced code blocks line-by-line so nothing inside is parsed.
-#   3. For each non-code line, apply inline transforms in a fixed order.
-#   4. Assemble.
-# ---------------------------------------------------------------------
 
 class Markdown:
     _HEADER_COLORS = {
@@ -321,6 +311,17 @@ class Markdown:
         5: (200, 200, 200),
         6: (160, 160, 160),
     }
+
+    # --- table detection ---------------------------------------------
+
+    _TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
+    _TABLE_SEP_RE = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
+    _TABLE_BLOCK_RE = re.compile(
+        r"(?:^\s*\|.+\|\s*$\n)"
+        r"(?:^\s*\|[\s:|-]+\|\s*$\n)"
+        r"(?:^\s*\|.+\|\s*$\n?)*",
+        re.MULTILINE,
+    )
 
     # --- inline transforms -------------------------------------------
 
@@ -350,23 +351,23 @@ class Markdown:
                                     lambda s: f"{BOLD}{s}{UNBOLD}")
         text = Markdown._wrap_pairs(text, "__", "__",
                                     lambda s: f"{BOLD}{s}{UNBOLD}")
+
         # 4. Strikethrough ~~...~~
         text = Markdown._wrap_pairs(text, "~~", "~~",
-                            lambda s: f"{STRIKE}{s}{UNSTRIKE}")
+                                    lambda s: f"{STRIKE}{s}{UNSTRIKE}")
 
-        # 4.5. Italic *...* and _..._
+        # 5. Italic *...* and _..._
         text = Markdown._wrap_pairs(text, "*", "*",
                                     lambda s: f"{ITALIC}{s}{UNITALIC}")
         text = Markdown._wrap_pairs(text, "_", "_",
                                     lambda s: f"{ITALIC}{s}{UNITALIC}")
 
-        # 5. Links [label](url)
+        # 6. Links [label](url)
         text = Markdown._links(text)
         return text
 
     @staticmethod
     def _wrap_pairs(text: str, open_m: str, close_m: str, wrap) -> str:
-        """Replace non-overlapping open_m ... close_m with wrap(inner)."""
         result = []
         i = 0
         n = len(text)
@@ -402,6 +403,78 @@ class Markdown:
             result.append(text[i])
             i += 1
         return "".join(result)
+
+    # --- table rendering ---------------------------------------------
+
+    @staticmethod
+    def _parse_table_row(line: str) -> list[str] | None:
+        m = Markdown._TABLE_ROW_RE.match(line)
+        if not m:
+            return None
+        body = m.group(1)
+        cells = re.split(r"(?<!\\)\|", body)
+        return [c.strip().replace(r"\|", "|") for c in cells]
+
+    @staticmethod
+    def _is_separator_row(cells: list[str]) -> bool:
+        if not cells:
+            return False
+        for c in cells:
+            stripped = c.strip()
+            if not stripped:
+                continue
+            if not all(ch in "-: " for ch in stripped):
+                return False
+            if "-" not in stripped:
+                return False
+        return True
+
+    @staticmethod
+    def _render_table(rows: list[list[str]]) -> str:
+        if not rows:
+            return ""
+
+        ncols = max(len(r) for r in rows)
+        for r in rows:
+            while len(r) < ncols:
+                r.append("")
+
+        widths = [0] * ncols
+        for r in rows:
+            for i, cell in enumerate(r):
+                widths[i] = max(widths[i], len(cell))
+
+        header_bg = bg(60, 60, 60)
+        header_fg = fg(220, 220, 220)
+        dash_color = fg(130, 130, 130)
+        sep_color = fg(70, 70, 70)
+
+        def header_line(cells: list[str]) -> str:
+            padded = [f" {c.ljust(widths[i])} " for i, c in enumerate(cells)]
+            sep = f"{header_bg} {BG_RESET}"
+            body = sep.join(padded)
+            return f"{header_bg}{header_fg}{BOLD}{body}{UNBOLD}{RESET}"
+
+        def dash_line() -> str:
+            segments = ["─" * (w + 2) for w in widths]
+            return f"{dash_color}{BOLD}{'───'.join(segments)}{UNBOLD}{RESET}"
+
+        def data_line(cells: list[str]) -> str:
+            padded = [f" {c.ljust(widths[i])} " for i, c in enumerate(cells)]
+            return f"{'  '.join(padded)}"
+
+        def separator() -> str:
+            total = sum(w + 2 for w in widths) + 2 * (ncols - 1)
+            return f"{sep_color}{'─' * total}{RESET}"
+
+        out = []
+        out.append(header_line(rows[0]))
+        out.append(dash_line())
+        for i, r in enumerate(rows[1:]):
+            if i > 0:
+                out.append(separator())
+            out.append(data_line(r))
+        return "\n".join(out)
 
     # --- line transforms ---------------------------------------------
 
@@ -475,6 +548,28 @@ class Markdown:
             return text
         text = text.replace("\r\n", "\n").replace("\r", "\n")
 
+        # 1. Stash tables (they span multiple lines)
+        table_blocks: list[str] = []
+
+        def _stash_table(match):
+            block = match.group(0)
+            rows = []
+            for line in block.split("\n"):
+                cells = Markdown._parse_table_row(line)
+                if cells is None:
+                    continue
+                if Markdown._is_separator_row(cells):
+                    continue
+                rows.append(cells)
+            if not rows:
+                return block
+            rendered = Markdown._render_table(rows)
+            table_blocks.append(rendered)
+            return f"\x00TABLE{len(table_blocks) - 1}\x00"
+
+        text = Markdown._TABLE_BLOCK_RE.sub(_stash_table, text)
+
+        # 2. Line-by-line pass
         lines = text.split("\n")
         out: list[str] = []
         in_fence = False
@@ -497,8 +592,12 @@ class Markdown:
                     continue
 
             if in_fence:
-                # Every line inside a fence gets a uniform code-block style
                 out.append(f"{DIM}{fg(220, 220, 170)} {line}{RESET}")
+                continue
+
+            # Table placeholder — emit verbatim
+            if line.strip().startswith("\x00TABLE"):
+                out.append(line)
                 continue
 
             # Horizontal rule
@@ -531,27 +630,42 @@ class Markdown:
             # Plain paragraph line
             out.append(Markdown._inline(line))
 
-        return "\n".join(out)
+        processed = "\n".join(out)
+
+        # 3. Restore tables
+        def _restore_table(m):
+            return table_blocks[int(m.group(1))]
+
+        processed = re.sub(r"\x00TABLE(\d+)\x00", _restore_table, processed)
+        return processed
 
 
-# Convenience alias so both `Markdown.render` and `render_markdown` work
-def render_markdown(text: str) -> str:
-    return Markdown.render(text)
+# ---------------------------------------------------------------------
+# ANSI stripping
+# ---------------------------------------------------------------------
 
-
-    
 _ANSI_RE = re.compile(r"\033\[[0-9;]*[A-Za-z]")
 
 
 def strip_ansi(text: str) -> str:
     """Remove ANSI SGR sequences from text."""
     return _ANSI_RE.sub("", text)
-    
+
+
+def render_markdown(text: str) -> str:
+    return Markdown.render(text)
+
+
 if __name__ == "__main__":
     sample = (
         "# Heading 1\n"
         "## Heading 2\n\n"
         "Plain **bold** and *italic* and `code`.\n\n"
+        "| Name    | Role   | Notes        |\n"
+        "|---------|--------|--------------|\n"
+        "| Alice   | Admin  | Since 2024   |\n"
+        "| Bob     | Editor | On vacation  |\n"
+        "| Carol   | Viewer | New          |\n\n"
         "- bullet one\n"
         "- bullet two\n\n"
         "> a quote\n\n"
