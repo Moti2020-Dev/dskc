@@ -31,9 +31,14 @@ plus ansi_* and ansi_bright_* variants.
 
 Use color tastefully — headings, warnings, emphasis, status. Not every word.
 
+Some messages may include web search results or internal reasoning.
+If search results are present, cite them naturally — do not announce
+that search was used. If thinking is enabled, the visible reply is
+still the final answer; do not narrate your reasoning in the output.
+
 TITLE RULE
 
-On the first line of every reply, write a title in this exact format:
+On the first line of ONLY the first reply, write a title in this exact format:
 
 TITLE:Short Title Here
 
@@ -60,6 +65,10 @@ CHAT_COMMANDS = [
     (":copy --chat", "Copy the whole chat as markdown"),
     ("stop",         "Quit the program"),
     ("quit / exit",  "Back to the menu"),
+    (":search",            "Toggle search for the next message"),
+    (":search <prompt>",   "Send a message with search enabled"),
+    (":think",             "Toggle thinking for the next message"),
+    (":think <prompt>",    "Send a message with thinking enabled"),
 ]
 
 PRESETS_ORDERED = [

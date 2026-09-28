@@ -1,12 +1,10 @@
 import asyncio
 import uuid
 
-import aiohttp
-
 from lib_color import Color
 
 from . import config
-from .api import create_chat_session
+from .api import DeepSeekAPI
 from .banner import show_banner
 from .chat import chat_loop
 from .debug import dbg
@@ -98,7 +96,7 @@ async def _ask_idx(question: str):
     return idx_raw
 
 
-async def menu(session, token):
+async def menu(api: DeepSeekAPI):
     while True:
         items = show_menu(load_chats().get("chats", {}))
 
@@ -118,12 +116,10 @@ async def menu(session, token):
         if raw == S_CANCEL:
             continue
 
-        # Settings
         if raw == S_SETTINGS:
             await settings_menu()
             continue
 
-        # Rename
         if raw == S_RENAME:
             if not items:
                 print(Color.MessagePresets.Warning("  Create a chat to rename it."))
@@ -150,7 +146,6 @@ async def menu(session, token):
                 print(Color.MessagePresets.Success("  Renamed."))
             continue
 
-        # Delete
         if raw == S_DELETE:
             if not items:
                 print(Color.MessagePresets.Warning("  Create a chat to delete it."))
@@ -177,7 +172,6 @@ async def menu(session, token):
                 print(Color.MessagePresets.Success("  Deleted."))
             continue
 
-        # Export
         if raw == S_EXPORT:
             if not items:
                 print(Color.MessagePresets.Warning("  Create a chat to export it."))
@@ -197,13 +191,11 @@ async def menu(session, token):
                 print(Color.MessagePresets.Warning("  No history to export for this chat."))
             continue
 
-        # New chat
         if raw == "0":
-            chat_id = await create_chat_session(session, token)
+            chat_id = await api.create_chat_session()
             print(Color.MessagePresets.Success(f"  Created new chat: {chat_id}"))
             return chat_id, None, True
 
-        # Resume by number
         if raw.isdigit() and 1 <= int(raw) <= len(items):
             cid, meta = items[int(raw) - 1]
             parent = meta.get("parent_message_id")
@@ -211,7 +203,6 @@ async def menu(session, token):
             print(Color.MessagePresets.Info(f"  Resuming: {cid}"))
             return cid, parent, False
 
-        # Resume by UUID
         try:
             uuid.UUID(raw)
             parent = load_chats().get("chats", {}).get(raw, {}).get("parent_message_id")
@@ -222,10 +213,10 @@ async def menu(session, token):
 
 
 async def run(token: str):
-    async with aiohttp.ClientSession() as session:
+    async with DeepSeekAPI(token) as api:
         while True:
             try:
-                choice = await menu(session, token)
+                choice = await menu(api)
             except SystemExit:
                 raise
             except (KeyboardInterrupt, asyncio.CancelledError):
@@ -233,7 +224,7 @@ async def run(token: str):
 
             chat_id, parent, first_turn = choice
             try:
-                await chat_loop(session, token, chat_id, parent, first_turn)
+                await chat_loop(api, chat_id, parent, first_turn)
             except SystemExit:
                 raise
             except (KeyboardInterrupt, asyncio.CancelledError):

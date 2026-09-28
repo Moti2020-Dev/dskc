@@ -1,22 +1,32 @@
 import asyncio
 import re
+
 from lib_color import Color
+
 from . import config, reference
-from .api import send_message, fetch_chat_title
+from .api import DeepSeekAPI
 from .colors import render_markdown
 from .copy import ContainerStore, handle_copy
 from .debug import dbg
 from .export import export_chat_markdown, handle_save
 from .load import read_load_file
 from .notify import notify
-from .sessions import ask_multiline, ask_input, S_CANCEL
+from .sessions import S_CANCEL, ask_input, ask_multiline
 from .storage import (
-    update_chat, append_history, truncate_history_tail, load_chats, load_history,
+    append_history,
+    load_chats,
+    load_history,
+    truncate_history_tail,
+    update_chat,
 )
-from .terminal import set_title, reset_title
+from .terminal import reset_title, set_title
 from .themes import tag
 
 _TITLE_RE = re.compile(r"^TITLE:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _hyperlink(url: str, label: str) -> str:
+    return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
 
 
 def _extract_title(text: str):
@@ -27,8 +37,6 @@ def _extract_title(text: str):
         return title, text[m.end():].lstrip("\n")
     return None, text
 
-def _hyperlink(url: str, label: str) -> str:
-    return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
 
 def _chat_render_fn(chat_id: str):
     data = load_history(chat_id)
@@ -42,33 +50,32 @@ def _chat_render_fn(chat_id: str):
 
 
 def _build_first_message(prefix: str, user_message: str) -> str:
-    """
-    Combine the autosend template with the user's first real message.
-    The model is instructed to reply with a title marker and then the
-    actual answer, without acknowledging the formatting rules.
-    """
     return (
         prefix.rstrip()
         + "\n\n---\n\n"
         + user_message
         + "\n\n"
         + "(Reply to the message above. Do not acknowledge these formatting "
-          "rules. Start your reply with \\{Short Title}\\ on its own line, "
+          "rules. Start your reply with TITLE:Short Title on its own line, "
           "then your answer.)"
     )
 
 
-async def _send_and_render(session, token, chat_id, parent_message_id,
+async def _send_and_render(api: DeepSeekAPI, chat_id, parent_message_id,
                            prompt: str, store: ContainerStore,
-                           *, truncate_before: bool = False):
+                           *, truncate_before: bool = False,
+                           extract_title: bool = False,
+                           search: bool = False,
+                           thinking: bool = False):
     if truncate_before:
         truncate_history_tail(chat_id, 2)
 
     append_history(chat_id, "user", prompt)
 
     try:
-        reply, response_id = await send_message(
-            session, token, prompt, chat_id, parent_message_id
+        reply, response_id = await api.send_message(
+            prompt, chat_id, parent_message_id,
+            search=search, thinking=thinking,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         print()
@@ -80,13 +87,11 @@ async def _send_and_render(session, token, chat_id, parent_message_id,
         return parent_message_id, prompt, None
 
     title_from_reply, reply = _extract_title(reply)
-    if title_from_reply:
-        dbg("title from reply", title_from_reply)
+    if title_from_reply and extract_title:
         update_chat(chat_id, title=title_from_reply)
         set_title(f"DSKC — {title_from_reply}")
 
     append_history(chat_id, "assistant", reply)
-
     store.clear()
     print()
     print(render_markdown(reply, store=store))
@@ -97,7 +102,7 @@ async def _send_and_render(session, token, chat_id, parent_message_id,
     return new_parent, prompt, reply
 
 
-async def chat_loop(session, token, chat_id: str, parent_message_id,
+async def chat_loop(api: DeepSeekAPI, chat_id: str, parent_message_id,
                     first_turn: bool):
     url = f"https://chat.deepseek.com/a/chat/s/{chat_id}"
     title = load_chats().get("chats", {}).get(chat_id, {}).get("title", "(untitled)")
@@ -117,13 +122,13 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
     last_user_message: str | None = None
     last_parent_id = parent_message_id
     last_reply: str | None = None
+    search_next: bool = False
+    think_next: bool = False
 
-    # Autosend prefix is consumed by the first real user message
     pending_prefix: str = ""
     if first_turn:
         pending_prefix = config.get_autosend()
 
-    # Draft restore
     draft = config.get_draft(chat_id)
     if draft:
         print(tag("dim", "  (restored unsent draft)"))
@@ -143,13 +148,24 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
 
     print()
 
+    def _prompt_label():
+        tags = []
+        if search_next:
+            tags.append(tag("warning", "[search]"))
+        if think_next:
+            tags.append(tag("info", "[think]"))
+        prefix = " ".join(tags)
+        if prefix:
+            prefix += " "
+        return prefix + tag("prompt", "Prompt: ")
+
     while True:
         try:
             if draft:
                 prompt = draft
                 draft = ""
             else:
-                prompt = await ask_multiline()
+                prompt = await ask_multiline(_prompt_label())
         except EOFError:
             print()
             reset_title()
@@ -169,7 +185,6 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
             reset_title()
             return
 
-        # Colon commands. Keep original case for file paths.
         if low.startswith(":"):
             cmd, _, _ = stripped[1:].partition(" ")
             args_orig = stripped[1 + len(cmd):].lstrip()
@@ -197,16 +212,71 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                 last_user_message = outgoing
                 last_parent_id = parent_message_id
                 new_parent, _, last_reply = await _send_and_render(
-                    session, token, chat_id, parent_message_id, outgoing, store
+                    api, chat_id, parent_message_id, outgoing, store,
+                    extract_title=first_turn,
                 )
                 parent_message_id = new_parent
                 notify("DSKC", "Reply received")
                 if first_turn:
-                    fetched = await fetch_chat_title(session, token, chat_id)
+                    fetched = await api.fetch_chat_title(chat_id)
                     fallback = text[:40] + ("..." if len(text) > 40 else "")
                     update_chat(chat_id, title=fetched or fallback)
                     set_title(f"DSKC — {fetched or fallback}")
                     first_turn = False
+                continue
+
+            if cmd == "search":
+                if args_orig.strip():
+                    outgoing = args_orig.strip()
+                    if pending_prefix:
+                        outgoing = _build_first_message(pending_prefix, outgoing)
+                        pending_prefix = ""
+                    last_user_message = outgoing
+                    last_parent_id = parent_message_id
+                    new_parent, _, last_reply = await _send_and_render(
+                        api, chat_id, parent_message_id, outgoing, store,
+                        extract_title=first_turn, search=True,
+                        thinking=think_next,
+                    )
+                    parent_message_id = new_parent
+                    notify("DSKC", "Reply received")
+                    if first_turn:
+                        fetched = await api.fetch_chat_title(chat_id)
+                        fallback = outgoing[:40] + ("..." if len(outgoing) > 40 else "")
+                        update_chat(chat_id, title=fetched or fallback)
+                        set_title(f"DSKC — {fetched or fallback}")
+                        first_turn = False
+                else:
+                    search_next = not search_next
+                    state = "enabled" if search_next else "disabled"
+                    print(Color.MessagePresets.Info(f"  Search {state} for next message."))
+                continue
+
+            if cmd == "think":
+                if args_orig.strip():
+                    outgoing = args_orig.strip()
+                    if pending_prefix:
+                        outgoing = _build_first_message(pending_prefix, outgoing)
+                        pending_prefix = ""
+                    last_user_message = outgoing
+                    last_parent_id = parent_message_id
+                    new_parent, _, last_reply = await _send_and_render(
+                        api, chat_id, parent_message_id, outgoing, store,
+                        extract_title=first_turn, search=search_next,
+                        thinking=True,
+                    )
+                    parent_message_id = new_parent
+                    notify("DSKC", "Reply received")
+                    if first_turn:
+                        fetched = await api.fetch_chat_title(chat_id)
+                        fallback = outgoing[:40] + ("..." if len(outgoing) > 40 else "")
+                        update_chat(chat_id, title=fetched or fallback)
+                        set_title(f"DSKC — {fetched or fallback}")
+                        first_turn = False
+                else:
+                    think_next = not think_next
+                    state = "enabled" if think_next else "disabled"
+                    print(Color.MessagePresets.Info(f"  Thinking {state} for next message."))
                 continue
 
             if cmd == "copy":
@@ -224,8 +294,8 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                     print(Color.MessagePresets.Warning("  Nothing to retry yet."))
                     continue
                 new_parent, _, last_reply = await _send_and_render(
-                    session, token, chat_id, last_parent_id,
-                    last_user_message, store, truncate_before=True,
+                    api, chat_id, last_parent_id, last_user_message, store,
+                    truncate_before=True, extract_title=first_turn,
                 )
                 parent_message_id = new_parent
                 notify("DSKC", "Reply received")
@@ -249,8 +319,8 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
                     continue
                 last_user_message = new_text
                 new_parent, _, last_reply = await _send_and_render(
-                    session, token, chat_id, last_parent_id,
-                    new_text, store, truncate_before=True,
+                    api, chat_id, last_parent_id, new_text, store,
+                    truncate_before=True, extract_title=first_turn,
                 )
                 parent_message_id = new_parent
                 notify("DSKC", "Reply received")
@@ -267,24 +337,30 @@ async def chat_loop(session, token, chat_id: str, parent_message_id,
             print(Color.MessagePresets.Error(f"  Unknown command: :{cmd}"))
             continue
 
-        # Normal message — prepend the autosend prefix on the first turn
-        outgoing = stripped
+                outgoing = stripped
         if pending_prefix:
             outgoing = _build_first_message(pending_prefix, stripped)
             pending_prefix = ""
 
-        dbg("user message", (len(outgoing), outgoing[:60]))
+        use_search = search_next
+        use_think = think_next
+        search_next = False
+        think_next = False
+
+        dbg("user message", (len(outgoing), outgoing[:60],
+                             f"search={use_search}", f"think={use_think}"))
         last_user_message = outgoing
         last_parent_id = parent_message_id
 
         new_parent, _, last_reply = await _send_and_render(
-            session, token, chat_id, parent_message_id, outgoing, store
+            api, chat_id, parent_message_id, outgoing, store,
+            extract_title=first_turn, search=use_search, thinking=use_think,
         )
         parent_message_id = new_parent
         notify("DSKC", "Reply received")
 
         if first_turn:
-            fetched = await fetch_chat_title(session, token, chat_id)
+            fetched = await api.fetch_chat_title(chat_id)
             fallback = stripped[:40] + ("..." if len(stripped) > 40 else "")
             update_chat(chat_id, title=fetched or fallback)
             set_title(f"DSKC — {fetched or fallback}")
