@@ -1,3 +1,10 @@
+# WARNING - THIS IS NOT MAINTAINED ANYMORE
+
+I have decided to move to private Github service "gogs";
+A painless self-hosted Git service
+[Link](https://gogs.io)
+
+---
 # DSKC — DeepSeek Client
 
 A terminal client for DeepSeek's web chat. Talks to the same backend the browser uses, so it's free, requires no API key, and supports the same models and features. Renders markdown and true 24-bit color, persists chats locally, and lets you resume any conversation across restarts.
